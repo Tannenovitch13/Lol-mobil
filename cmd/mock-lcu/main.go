@@ -195,8 +195,8 @@ func (m *mock) startChampSelect(aram bool) {
 	}
 	m.session = map[string]any{
 		"localPlayerCellId": 2, "myTeam": myTeam, "theirTeam": theirTeam,
-		"bans":    map[string]any{"myTeamBans": []any{}, "theirTeamBans": []any{}, "numBans": 6},
-		"trades":  []any{}, "pickOrderSwaps": []any{}, "positionSwaps": []any{},
+		"bans":   map[string]any{"myTeamBans": []any{}, "theirTeamBans": []any{}, "numBans": 6},
+		"trades": []any{}, "pickOrderSwaps": []any{}, "positionSwaps": []any{},
 		"benchEnabled": false, "benchChampions": []any{}, "allowRerolling": false, "rerollsRemaining": 0,
 		"timer": map[string]any{"phase": "BAN_PICK", "adjustedTimeLeftInPhase": 30000, "isInfinite": false, "totalTimeInPhase": 30000},
 	}

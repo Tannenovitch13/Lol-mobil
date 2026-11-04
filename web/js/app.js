@@ -9,6 +9,7 @@ import {
   setToken,
   store,
   takeTokenFromUrl,
+  toast,
   useLcu,
   useStore,
 } from "./api.js";
@@ -95,6 +96,7 @@ function Settings({ onClose }) {
           automatiquement dans Rose ; redémarre ensuite le client LoL.
         </p>`}
       </div>
+      ${android && html`<${AndroidSettings} android=${android} />`}
       ${android &&
       html`<button class="btn secondary wide" onClick=${() => android.disconnect && android.disconnect()}>
         Changer de PC
@@ -111,6 +113,36 @@ function Settings({ onClose }) {
       </button>`}
       <button class="btn wide" onClick=${onClose}>Fermer</button>
     </div>
+  </div>`;
+}
+
+function AndroidSettings({ android }) {
+  const [notif, setNotif] = useState(() => {
+    try {
+      return android.notificationsEnabled();
+    } catch (e) {
+      return true;
+    }
+  });
+  return html`<div class="android-settings">
+    <label class="switch-row">
+      <span>
+        <b>Notifications</b>
+        <small>Partie trouvée (avec Accepter/Refuser) et « à toi de jouer », même écran éteint.</small>
+      </span>
+      <input
+        type="checkbox"
+        checked=${notif}
+        onChange=${(e) => {
+          setNotif(e.target.checked);
+          android.setNotifications(e.target.checked);
+        }}
+      />
+    </label>
+    ${notif &&
+    html`<button class="btn secondary wide" onClick=${() => android.requestBatteryExemption()}>
+      Autoriser LolMobil en arrière-plan (batterie)
+    </button>`}
   </div>`;
 }
 
@@ -232,6 +264,11 @@ function App() {
   const phase = useLcu("/lol-gameflow/v1/gameflow-phase");
   useEffect(() => {
     document.body.dataset.phase = phase || "";
+    // Keep the phone awake while a decision is needed.
+    const android = window.LolMobilAndroid;
+    if (android && android.keepScreenOn) {
+      android.keepScreenOn(phase === "ReadyCheck" || phase === "ChampSelect");
+    }
   }, [phase]);
   return html`
     ${connection !== "unpaired" && html`<${Header} onSettings=${() => setSettingsOpen(true)} />`}
@@ -240,6 +277,8 @@ function App() {
     <${Toasts} />
   `;
 }
+
+window.onAndroidNotice = (msg) => toast(msg && msg.text ? msg.text : String(msg));
 
 takeTokenFromUrl();
 connect();

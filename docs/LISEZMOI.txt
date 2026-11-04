@@ -1,0 +1,38 @@
+LolMobil Companion
+==================
+
+Pilote le client League of Legends depuis ton téléphone : choix du mode,
+file d'attente, acceptation des parties, bans/picks, skins (compatible Rose),
+runes et sorts.
+
+1. Lance LolMobil-Companion.exe et laisse la fenêtre ouverte.
+   - Windows peut afficher « Windows a protégé votre ordinateur » (programme
+     non signé) : « Informations complémentaires » puis « Exécuter quand même ».
+   - Le pare-feu Windows demande l'accès réseau : coche « Réseaux privés »
+     puis « Autoriser ». Sans ça, le téléphone ne peut pas se connecter.
+
+2. Sur le téléphone (même Wi-Fi que le PC) :
+   - Android : installe LolMobil.apk, ouvre l'appli, choisis ton PC dans la
+     liste (ou scanne le QR code) et tape le code d'appairage affiché par le
+     compagnon.
+   - iPhone ou sans l'appli : ouvre dans le navigateur l'adresse affichée par
+     le compagnon (http://192.168.x.x:8787) et tape le code d'appairage.
+
+3. Avec Rose (skins non possédés) :
+   Le compagnon installe tout seul le plugin LolMobil-Remote dans les plugins
+   Pengu Loader de Rose (C:\Program Files\Rose\_internal\Pengu Loader\plugins).
+   Il faut lancer le compagnon une fois en administrateur si Rose est dans
+   « Program Files », puis redémarrer le client LoL.
+   Installation manuelle : copie le dossier LolMobil-Remote de ce zip dans le
+   dossier « plugins » de Pengu Loader.
+
+Options utiles (dans un terminal) :
+  LolMobil-Companion.exe -pair              ouvre la page avec le QR code
+  LolMobil-Companion.exe -reset-pairing     nouveau code (déconnecte les téléphones)
+  LolMobil-Companion.exe -league-path "D:\Riot Games\League of Legends"
+  LolMobil-Companion.exe -pengu-plugins "D:\Pengu Loader\plugins"
+  LolMobil-Companion.exe -port 8787
+
+Configuration et journal : %APPDATA%\LolMobil\ (config.json, companion.log)
+
+Projet : https://github.com/tannenovitch13/lol-mobil
