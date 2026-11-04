@@ -22,6 +22,8 @@ type Credentials struct {
 	BaseURL string
 	// Source says where the credentials were found (for logs).
 	Source string
+	// InstallDir is the League install folder, when known.
+	InstallDir string
 }
 
 // URL returns the base URL of the LCU API.
@@ -156,11 +158,13 @@ func riotMetadataInstallDirs() []string {
 func Discover(configuredDir string, allowProcessScan bool) (Credentials, string, error) {
 	for _, dir := range candidateInstallDirs(configuredDir) {
 		if creds, err := ReadLockfile(dir); err == nil {
+			creds.InstallDir = dir
 			return creds, dir, nil
 		}
 	}
 	if allowProcessScan {
 		if creds, install, ok := scanProcess(); ok {
+			creds.InstallDir = install
 			return creds, install, nil
 		}
 	}

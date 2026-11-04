@@ -26,6 +26,7 @@ import (
 	"github.com/mdp/qrterminal/v3"
 
 	lolmobil "github.com/tannenovitch13/lol-mobil"
+	"github.com/tannenovitch13/lol-mobil/internal/builds"
 	"github.com/tannenovitch13/lol-mobil/internal/config"
 	"github.com/tannenovitch13/lol-mobil/internal/lcu"
 	"github.com/tannenovitch13/lol-mobil/internal/pengu"
@@ -62,6 +63,8 @@ func run() error {
 		remoteFlag    = flag.String("remote", "", "remote access through public MQTT brokers: on (default) or off (saved)")
 		brokersFlag   = flag.String("brokers", "", "comma-separated wss:// MQTT brokers for remote access (saved; \"default\" resets)")
 		webURLFlag    = flag.String("web-url", "", "static copy of the web interface for phones without the app (saved)")
+		opggURL       = flag.String("opgg-url", "", "OP.GG champion API base URL (tests)")
+		blitzURL      = flag.String("blitz-url", "", "Blitz GraphQL URL (tests)")
 		installOnly   = flag.Bool("install-plugin-only", false, "install the plugin into -pengu-plugins with -port, then exit (used for the administrator prompt)")
 	)
 	flag.Parse()
@@ -154,6 +157,7 @@ func run() error {
 		Web:     lolmobil.Web(),
 		Version: version,
 		Name:    name,
+		Builds:  builds.NewService(*opggURL, *blitzURL),
 	}
 	connector.OnEvent = srv.OnLCUEvent
 	connector.OnStatus = srv.OnLCUStatus

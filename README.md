@@ -25,6 +25,7 @@ le téléphone, tu peux choisir n'importe quel skin, même non possédé, et Ros
 | **Partie trouvée** | Accepter / Refuser avec compte à rebours. Sur Android, une **notification avec boutons Accepter/Refuser** arrive même écran éteint. Option « accepter automatiquement » côté PC |
 | **Sélection des champions** | équipes, bans, minuteur, recherche de champion, survol, verrouillage, intention en phase de planification, banc ARAM et relance, échanges reçus/proposés. Notification « à toi de jouer » sur Android |
 | **Skins** | tous les skins du champion. Ceux que tu possèdes sont sélectionnés par le client. **Avec Rose, ceux que tu ne possèdes pas aussi**, ainsi que les chromas |
+| **Builds OP.GG / Blitz** | les builds les plus joués de ton champion pour ton rôle (ou en ARAM/URF), avec taux de victoire. En un clic : **page de runes**, **set d'objets** dans la boutique en jeu (départ, principaux, bottes, ensuite, ordre des compétences) et **sorts** (Saut éclair reste sur ta touche). Option « appliquer automatiquement » au verrouillage du champion, comme les applis Blitz et OP.GG |
 | **Runes** | choix de la page active, éditeur complet (arbres, runes, fragments), **pages recommandées** du client en un clic |
 | **Sorts** | choix des deux sorts d'invocateur (filtrés selon le mode) |
 | **Salon et amis** | inviter des amis en ligne, des joueurs suggérés ou un Riot ID, nommer chef, exclure, donner ou retirer le droit d'inviter |
@@ -120,6 +121,24 @@ ou depuis n'importe quel Wi-Fi.
   de toi, déploie ton propre relais Cloudflare gratuit (voir [`relay/README.md`](relay/README.md)) et lance
   le compagnon avec `-relay https://…`.
 - Désactiver l'accès à distance : `-remote off`.
+
+## Builds OP.GG et Blitz
+
+Dans la sélection des champions, l'onglet **Builds** affiche jusqu'à trois builds populaires pour ton
+champion, ton rôle et le mode de jeu (Faille, ARAM, URF). Choisis la source (OP.GG ou Blitz), coche ce
+que tu veux appliquer (runes, set d'objets, sorts), puis touche « Appliquer ce build ». Le compagnon :
+
+- réutilise toujours la même page de runes (nommée « OP.GG Ahri Milieu », par exemple) au lieu de
+  remplir tes pages ;
+- crée ou remplace un **set d'objets** pour ce champion, visible dans la boutique en jeu (onglet des sets
+  d'objets) et dans la Collection du client ;
+- règle les deux sorts, en gardant Saut éclair sur la touche que tu utilises déjà.
+
+L'option **Appliquer automatiquement** fait tout cela dès que ton champion est verrouillé.
+
+Les données viennent des API qu'utilisent les sites et les applis OP.GG et Blitz. Elles ne sont pas
+publiques : si un site change son format, la source concernée peut cesser de fonctionner jusqu'à une mise
+à jour de LolMobil. L'Arène n'est pas encore prise en charge.
 
 ## Options du compagnon
 

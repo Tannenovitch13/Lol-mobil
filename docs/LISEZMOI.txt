@@ -35,6 +35,11 @@ runes et sorts.
    Les échanges passent par des serveurs MQTT publics gratuits, chiffrés de
    bout en bout. Pour couper : LolMobil-Companion.exe -remote off
 
+5. Builds OP.GG / Blitz : dans la sélection des champions, onglet « Builds »,
+   choisis un build populaire et touche « Appliquer » : page de runes, set
+   d'objets (boutique en jeu) et sorts. Option pour le faire
+   automatiquement au verrouillage du champion.
+
 Options utiles (dans un terminal) :
   LolMobil-Companion.exe -pair              ouvre la page avec le QR code
   LolMobil-Companion.exe -reset-pairing     nouveau code (déconnecte les téléphones)

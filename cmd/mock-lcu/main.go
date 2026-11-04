@@ -52,6 +52,7 @@ type mock struct {
 	currentPg int
 	nextPage  int
 	gen       int // invalidates pending automatic steps
+	itemSets  map[string]any
 
 	subsMu sync.Mutex
 	subs   map[*websocket.Conn]*sync.Mutex
@@ -465,6 +466,9 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if m.serveFakeClient(w, r) {
 		return
 	}
+	if m.serveBuildSites(w, r) {
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/lol-game-data/assets/") && !strings.HasSuffix(r.URL.Path, ".json") {
 		serveImage(w, r.URL.Path) // no auth: lets the fake client page show thumbnails
 		return
@@ -484,6 +488,9 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.serveItemSets(w, r, raw) {
+		return
+	}
 	p := r.URL.Path
 	key := r.Method + " " + p
 	switch key {
@@ -492,7 +499,9 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "GET /lol-gameflow/v1/session":
 		writeJSON(w, 200, m.gameflowSession())
 	case "GET /lol-summoner/v1/current-summoner":
-		writeJSON(w, 200, map[string]any{"gameName": "Testeur", "tagLine": "EUW", "displayName": "Testeur", "profileIconId": 29, "summonerLevel": 187})
+		writeJSON(w, 200, map[string]any{"gameName": "Testeur", "tagLine": "EUW", "displayName": "Testeur", "profileIconId": 29, "summonerLevel": 187, "summonerId": 1, "accountId": 7})
+	case "GET /lol-game-data/assets/v1/items.json":
+		writeJSON(w, 200, itemsJSON())
 	case "GET /lol-lobby/v2/received-invitations":
 		writeJSON(w, 200, []any{})
 	case "GET /lol-chat/v1/friends":

@@ -29,6 +29,10 @@ type Config struct {
 	LeaguePath string `json:"leaguePath,omitempty"`
 	// AutoAccept accepts every ready check without waiting for the phone.
 	AutoAccept bool `json:"autoAccept"`
+	// AutoBuild applies the most popular build (runes, item set, spells)
+	// from BuildSource when the champion is locked.
+	AutoBuild   bool   `json:"autoBuild"`
+	BuildSource string `json:"buildSource,omitempty"` // opgg (default) or blitz
 	// PenguPluginsDir is an optional Pengu Loader plugins folder where the
 	// LolMobil-Remote plugin is installed. Detected (Rose) when empty.
 	PenguPluginsDir string `json:"penguPluginsDir,omitempty"`
@@ -134,6 +138,17 @@ func (c *Config) Update(fn func(c *Config)) error {
 	fn(c)
 	c.mu.Unlock()
 	return c.Save()
+}
+
+// BuildSettings reads the build options.
+func (c *Config) BuildSettings() (auto bool, source string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	source = c.BuildSource
+	if source == "" {
+		source = "opgg"
+	}
+	return c.AutoBuild, source
 }
 
 // GetAutoAccept reads the auto-accept option.

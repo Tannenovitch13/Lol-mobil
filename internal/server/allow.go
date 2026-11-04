@@ -15,6 +15,7 @@ var readWritePrefixes = []string{
 	"/lol-champ-select/",
 	"/lol-champ-select-legacy/",
 	"/lol-perks/",
+	"/lol-item-sets/",
 	"/lol-end-of-game/",
 	"/lol-pre-end-of-game/",
 	"/lol-honor-v2/",

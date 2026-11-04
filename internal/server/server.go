@@ -7,6 +7,8 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/tannenovitch13/lol-mobil/internal/builds"
 	"github.com/tannenovitch13/lol-mobil/internal/config"
 	"github.com/tannenovitch13/lol-mobil/internal/lcu"
 	"github.com/tannenovitch13/lol-mobil/internal/pengu"
@@ -48,6 +51,13 @@ type Server struct {
 
 	readyMu       sync.Mutex
 	readyAccepted bool
+
+	// Builds fetches OP.GG / Blitz builds (nil: feature off).
+	Builds        *builds.Service
+	autoBuildMu   sync.Mutex
+	autoBuildDone string
+	itemsMu       sync.Mutex
+	finalItemIDs  map[int]bool // completed items (client data, per session)
 }
 
 // client is one connected phone, on the Wi-Fi (websocket) or through the
@@ -399,7 +409,20 @@ type inbound struct {
 	BaseSkinID int64  `json:"baseSkinId"`
 
 	// settings
-	AutoAccept *bool `json:"autoAccept"`
+	AutoAccept  *bool   `json:"autoAccept"`
+	AutoBuild   *bool   `json:"autoBuild"`
+	BuildSource *string `json:"buildSource"`
+
+	// builds / apply-build
+	Source     string `json:"source"`
+	Position   string `json:"position"`
+	Mode       string `json:"mode"`
+	Tier       string `json:"tier"`
+	Region     string `json:"region"`
+	BuildIndex int    `json:"buildIndex"`
+	WithRunes  *bool  `json:"runes"`
+	WithItems  *bool  `json:"items"`
+	WithSpells *bool  `json:"spells"`
 }
 
 // handle processes one message from the phone.
@@ -423,7 +446,103 @@ func (c *client) handle(data []byte) {
 		go c.handleSelectChroma(msg)
 	case "settings":
 		c.handleSettings(msg)
+	case "builds":
+		go c.handleBuilds(msg)
+	case "apply-build":
+		go c.handleApplyBuild(msg)
 	}
+}
+
+func (msg inbound) buildRequest() builds.Request {
+	return builds.Request{
+		Source: msg.Source, ChampionID: int(msg.ChampionID), Position: msg.Position,
+		Mode: msg.Mode, Tier: msg.Tier, Region: msg.Region,
+	}
+}
+
+// handleBuilds fetches popular builds (OP.GG, Blitz) for the phone.
+func (c *client) handleBuilds(msg inbound) {
+	if c.s.Builds == nil {
+		c.respond(msg.ID, 503, nil, "builds indisponibles")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res, err := c.s.Builds.Fetch(ctx, msg.buildRequest())
+	if err != nil {
+		c.respond(msg.ID, 502, nil, err.Error())
+		return
+	}
+	c.respond(msg.ID, 200, mustJSON(c.s.finalItems(ctx, res)), "")
+}
+
+// finalItems keeps only completed items in the "next items" of builds.
+func (s *Server) finalItems(ctx context.Context, res *builds.Result) *builds.Result {
+	cl := s.LCU.Client()
+	if cl == nil {
+		return res
+	}
+	s.itemsMu.Lock()
+	final := s.finalItemIDs
+	s.itemsMu.Unlock()
+	if final == nil {
+		var err error
+		if final, err = builds.FinalItems(ctx, cl); err != nil {
+			return res
+		}
+		s.itemsMu.Lock()
+		s.finalItemIDs = final
+		s.itemsMu.Unlock()
+	}
+	return builds.WithFinalItems(res, final)
+}
+
+// handleApplyBuild writes a build (runes, item set, spells) into the client.
+func (c *client) handleApplyBuild(msg inbound) {
+	opt := builds.ApplyOptions{Runes: true, Items: true, Spells: true}
+	if msg.WithRunes != nil {
+		opt.Runes = *msg.WithRunes
+	}
+	if msg.WithItems != nil {
+		opt.Items = *msg.WithItems
+	}
+	if msg.WithSpells != nil {
+		opt.Spells = *msg.WithSpells
+	}
+	out, err := c.s.applyBuild(msg.buildRequest(), msg.BuildIndex, opt)
+	if err != nil {
+		c.respond(msg.ID, 502, nil, err.Error())
+		return
+	}
+	status := 200
+	if len(out.Done) == 0 {
+		status = 500
+	}
+	c.respond(msg.ID, status, mustJSON(out), strings.Join(out.Errors, " · "))
+}
+
+func (s *Server) applyBuild(req builds.Request, index int, opt builds.ApplyOptions) (builds.ApplyResult, error) {
+	cl := s.LCU.Client()
+	if cl == nil {
+		return builds.ApplyResult{}, errors.New("Client League non connecté")
+	}
+	if s.Builds == nil {
+		return builds.ApplyResult{}, errors.New("builds indisponibles")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	res, err := s.Builds.Fetch(ctx, req)
+	if err != nil {
+		return builds.ApplyResult{}, err
+	}
+	if index < 0 || index >= len(res.Builds) {
+		index = 0
+	}
+	res = s.finalItems(ctx, res)
+	opt.InstallDir = cl.Credentials().InstallDir
+	out := builds.Apply(ctx, cl, res, res.Builds[index], opt)
+	log.Printf("[Builds] %s %s for champion %d: done=%v errors=%v", res.SourceName, res.Builds[index].Label, req.ChampionID, out.Done, out.Errors)
+	return out, nil
 }
 
 func (c *client) respond(id int64, status int, body json.RawMessage, errText string) {
@@ -560,6 +679,18 @@ func (s *Server) sendSnapshots(c *client, paths []string) {
 }
 
 func (c *client) handleSettings(msg inbound) {
+	if msg.AutoBuild != nil || msg.BuildSource != nil {
+		if err := c.s.Cfg.Update(func(cfg *config.Config) {
+			if msg.AutoBuild != nil {
+				cfg.AutoBuild = *msg.AutoBuild
+			}
+			if msg.BuildSource != nil && (*msg.BuildSource == "opgg" || *msg.BuildSource == "blitz") {
+				cfg.BuildSource = *msg.BuildSource
+			}
+		}); err != nil {
+			log.Printf("[Config] Could not save: %v", err)
+		}
+	}
 	if msg.AutoAccept != nil {
 		c.s.SetAutoAccept(*msg.AutoAccept)
 	} else {
@@ -694,7 +825,8 @@ func (s *Server) broadcast(v any) {
 }
 
 func (s *Server) settings() map[string]any {
-	return map[string]any{"autoAccept": s.Cfg.GetAutoAccept()}
+	autoBuild, source := s.Cfg.BuildSettings()
+	return map[string]any{"autoAccept": s.Cfg.GetAutoAccept(), "autoBuild": autoBuild, "buildSource": source}
 }
 
 func (s *Server) statusMessage() map[string]any {
@@ -758,6 +890,9 @@ func (s *Server) BroadcastStatus() {
 
 // OnLCUStatus is called when the League client connects or goes away.
 func (s *Server) OnLCUStatus(cl *lcu.Client) {
+	s.itemsMu.Lock()
+	s.finalItemIDs = nil // new client, maybe a new patch
+	s.itemsMu.Unlock()
 	s.BroadcastStatus()
 	if cl == nil {
 		return
@@ -771,6 +906,9 @@ func (s *Server) OnLCUStatus(cl *lcu.Client) {
 func (s *Server) OnLCUEvent(ev lcu.Event) {
 	if ev.URI == "/lol-matchmaking/v1/ready-check" {
 		s.maybeAutoAccept(ev)
+	}
+	if ev.URI == "/lol-champ-select/v1/session" {
+		s.maybeAutoBuild(ev)
 	}
 	var data []byte
 	for _, c := range s.snapshotClients() {
@@ -827,6 +965,86 @@ func (s *Server) maybeAutoAccept(ev lcu.Event) {
 		}
 		log.Printf("[AutoAccept] Match accepted")
 		s.broadcast(map[string]any{"type": "notice", "text": "Partie acceptée automatiquement"})
+	}()
+}
+
+// maybeAutoBuild applies the popular build once the player's champion is
+// locked (option "autoBuild"), like the Blitz and OP.GG apps do.
+func (s *Server) maybeAutoBuild(ev lcu.Event) {
+	auto, source := s.Cfg.BuildSettings()
+	if !auto || ev.EventType == "Delete" {
+		return
+	}
+	var session struct {
+		GameID  int64 `json:"gameId"`
+		Local   int   `json:"localPlayerCellId"`
+		Actions [][]struct {
+			Actor     int    `json:"actorCellId"`
+			Type      string `json:"type"`
+			Completed bool   `json:"completed"`
+		} `json:"actions"`
+		MyTeam []struct {
+			CellID   int    `json:"cellId"`
+			Champion int    `json:"championId"`
+			Position string `json:"assignedPosition"`
+		} `json:"myTeam"`
+	}
+	if json.Unmarshal(ev.Data, &session) != nil {
+		return
+	}
+	champion, position := 0, ""
+	for _, c := range session.MyTeam {
+		if c.CellID == session.Local {
+			champion, position = c.Champion, c.Position
+		}
+	}
+	if champion <= 0 {
+		return
+	}
+	for _, group := range session.Actions {
+		for _, a := range group {
+			if a.Actor == session.Local && a.Type == "pick" && !a.Completed {
+				return // not locked yet
+			}
+		}
+	}
+	key := fmt.Sprintf("%d/%d", session.GameID, champion)
+	s.autoBuildMu.Lock()
+	if s.autoBuildDone == key {
+		s.autoBuildMu.Unlock()
+		return
+	}
+	s.autoBuildDone = key
+	s.autoBuildMu.Unlock()
+
+	go func() {
+		mode := "ranked"
+		if cl := s.LCU.Client(); cl != nil {
+			var flow struct {
+				GameData struct {
+					Queue struct {
+						GameMode string `json:"gameMode"`
+					} `json:"queue"`
+				} `json:"gameData"`
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if resp, err := cl.Do(ctx, http.MethodGet, "/lol-gameflow/v1/session", nil); err == nil {
+				_ = json.Unmarshal(resp.Body, &flow)
+				mode = builds.ModeForQueue(flow.GameData.Queue.GameMode)
+			}
+			cancel()
+		}
+		req := builds.Request{Source: source, ChampionID: champion, Position: position, Mode: mode}
+		out, err := s.applyBuild(req, 0, builds.ApplyOptions{Runes: true, Items: true, Spells: true})
+		if err != nil {
+			s.broadcast(map[string]any{"type": "notice", "text": "Build automatique impossible : " + err.Error()})
+			return
+		}
+		text := "Build appliqué automatiquement : " + strings.Join(out.Done, ", ")
+		if len(out.Errors) > 0 {
+			text += " (" + strings.Join(out.Errors, " · ") + ")"
+		}
+		s.broadcast(map[string]any{"type": "notice", "text": text})
 	}()
 }
 

@@ -4,6 +4,7 @@ import { championIcon, loadChampions, positionLabel, searchKey, useData } from "
 import { SkinsTab } from "./skins.js";
 import { RunesTab } from "./runes.js";
 import { SpellsTab } from "./spells.js";
+import { BuildsTab } from "./builds.js";
 
 const SESSION = "/lol-champ-select/v1/session";
 const PICKABLE = "/lol-champ-select/v1/pickable-champion-ids";
@@ -278,10 +279,11 @@ function ActionPanel({ session, active, futurePick, planning }) {
 function Tabs({ locked, myCell, session }) {
   const tabs = [
     ...(locked ? [["skins", "Skins"]] : []),
+    ["builds", "Builds"],
     ["runes", "Runes"],
     ["spells", "Sorts"],
   ];
-  const [tab, setTab] = useState(locked ? "skins" : "runes");
+  const [tab, setTab] = useState(locked ? "skins" : "builds");
   useEffect(() => {
     if (locked) setTab("skins");
   }, [locked]);
@@ -300,6 +302,7 @@ function Tabs({ locked, myCell, session }) {
     </div>
     <div class="tab-body">
       ${current === "skins" && html`<${SkinsTab} myCell=${myCell} session=${session} />`}
+      ${current === "builds" && html`<${BuildsTab} myCell=${myCell} />`}
       ${current === "runes" && html`<${RunesTab} myCell=${myCell} />`}
       ${current === "spells" && html`<${SpellsTab} myCell=${myCell} />`}
     </div>

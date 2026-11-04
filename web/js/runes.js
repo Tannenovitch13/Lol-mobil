@@ -22,7 +22,7 @@ function Icon({ perks, styles, id, kind, size = 32 }) {
   return html`<img class="rune-icon" src=${asset(path)} title=${name} alt=${name} width=${size} height=${size} />`;
 }
 
-function PageSummary({ page, perks, styles }) {
+export function PageSummary({ page, perks, styles }) {
   if (!page) return null;
   const ids = page.selectedPerkIds || [];
   return html`<div class="page-summary">

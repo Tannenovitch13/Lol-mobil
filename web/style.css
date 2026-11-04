@@ -980,3 +980,60 @@ input {
 .search.no-margin {
   margin-bottom: 0;
 }
+
+/* ---------- builds */
+.builds {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.build-card {
+  background: #05090f;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.build-card .page-summary {
+  margin-top: 0;
+}
+.build-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.build-line > .small:first-child {
+  min-width: 70px;
+}
+.item-row {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.item-icon {
+  border-radius: 4px;
+  border: 1px solid var(--line-soft);
+  background: #0a1428;
+}
+.skill-order {
+  margin-left: auto;
+  font-weight: 700;
+  color: var(--gold);
+  font-size: 0.9rem;
+}
+.apply-parts {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+.apply-parts input {
+  accent-color: var(--cyan);
+}
+.auto-build {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 10px;
+}

@@ -20,7 +20,8 @@ go build -o "$WORK/companion" ./cmd/lolmobil-companion
 "$WORK/mock-lcu" -rose -step 1s > "$WORK/mock.log" 2>&1 &
 MOCK_PID=$!
 sleep 0.5
-LOLMOBIL_CONFIG_DIR="$WORK/cfg" "$WORK/companion" -lcu-url http://127.0.0.1:29999 -lcu-password test -no-browser -no-plugin-install -remote off > "$WORK/companion.log" 2>&1 &
+LOLMOBIL_CONFIG_DIR="$WORK/cfg" "$WORK/companion" -lcu-url http://127.0.0.1:29999 -lcu-password test -no-browser -no-plugin-install -remote off \
+  -opgg-url http://127.0.0.1:29999 -blitz-url http://127.0.0.1:29999/graphql > "$WORK/companion.log" 2>&1 &
 COMP_PID=$!
 
 for _ in $(seq 1 50); do

@@ -47,6 +47,12 @@ export const loadStyles = () =>
     return list;
   });
 
+export const loadItems = () =>
+  load("items", async () => {
+    const list = await get("/lol-game-data/assets/v1/items.json");
+    return new Map(list.map((i) => [i.id, i]));
+  });
+
 export const loadQueues = () =>
   load("queues", async () => {
     const list = await get("/lol-game-queues/v1/queues");

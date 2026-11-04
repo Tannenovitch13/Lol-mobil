@@ -1,0 +1,26 @@
+{
+  "meta": {"version": "16.22"},
+  "data": {
+    "summary": {
+      "average_stats": {"win_rate": 0.5123, "pick_rate": 0.084, "play": 120345},
+      "positions": [
+        {"name": "MID", "stats": {"play": 118000, "pick_rate": 0.97}},
+        {"name": "SUPPORT", "stats": {"play": 2345, "pick_rate": 0.03}}
+      ]
+    },
+    "runes": [
+      {"primary_page_id": 8100, "secondary_page_id": 8200, "primary_rune_ids": [8112, 8126, 8140, 8135], "secondary_rune_ids": [8226, 8210], "stat_mod_ids": [5008, 5008, 5001], "pick_rate": 0.61, "play": 70000, "win": 36400},
+      {"primary_page_id": 8200, "secondary_page_id": 8300, "primary_rune_ids": [8229, 8226, 8210, 8237], "secondary_rune_ids": [8347, 8304], "stat_mod_ids": [5008, 5008, 5001], "pick_rate": 0.22, "play": 25000, "win": 12600}
+    ],
+    "summoner_spells": [{"ids": [14, 4], "pick_rate": 0.55, "play": 64000, "win": 33000}],
+    "starter_items": [{"ids": [1056, 2003, 2003], "pick_rate": 0.8, "play": 90000, "win": 46000}],
+    "core_items": [
+      {"ids": [6655, 4645, 3089], "pick_rate": 0.3, "play": 20000, "win": 11000},
+      {"ids": [3165, 4645, 3089], "pick_rate": 0.12, "play": 8000, "win": 4300}
+    ],
+    "boots": [{"ids": [3020], "pick_rate": 0.7, "play": 80000, "win": 41000}],
+    "last_items": [{"ids": [3157], "pick_rate": 0.3}, {"ids": [3135], "pick_rate": 0.2}, {"ids": [3089], "pick_rate": 0.2}],
+    "skills": [{"order": ["Q", "W", "E", "Q", "Q", "R", "Q", "W", "Q", "W", "R", "W", "W", "E", "E", "R", "E", "E"], "pick_rate": 0.4}],
+    "skill_masteries": [{"ids": ["Q", "W", "E"], "pick_rate": 0.6}]
+  }
+}
