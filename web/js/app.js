@@ -199,11 +199,16 @@ function PairScreen() {
   </main>`;
 }
 
-function Waiting({ title, text }) {
+function Waiting({ title, text, changePc }) {
+  const android = window.LolMobilAndroid;
   return html`<main class="center-screen">
     <div class="spinner"></div>
     <h2>${title}</h2>
     ${text && html`<p class="muted">${text}</p>`}
+    ${changePc &&
+    android &&
+    android.disconnect &&
+    html`<button class="btn secondary" onClick=${() => android.disconnect()}>Changer de PC</button>`}
   </main>`;
 }
 
@@ -255,6 +260,7 @@ function Router() {
     />`;
   if (connection !== "open")
     return html`<${Waiting}
+      changePc=${connection === "closed"}
       title="Connexion au PC…"
       text=${isRemoteMode()
         ? "Connexion au serveur de relais… Vérifie que le téléphone a accès à Internet."

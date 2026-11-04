@@ -55,12 +55,33 @@ class WebBridge(private val activity: MainActivity) {
         if (prefs.isRemote) return
         activity.runOnUiThread {
             val uri = activity.webView.url?.let { Uri.parse(it) } ?: return@runOnUiThread
+            val saved = prefs.baseUrl
+            if (uri.host == MainActivity.BUNDLED_HOST && saved != null) {
+                // Bundled interface: same PC, new token.
+                prefs.save(saved, token, prefs.pcName)
+                return@runOnUiThread
+            }
             val host = uri.host
             if (uri.scheme != "http" || host.isNullOrEmpty()) return@runOnUiThread
             prefs.save(Net.baseUrl(host, if (uri.port > 0) uri.port else 80), token, prefs.pcName)
             if (prefs.notifications) {
                 activity.ensureNotificationPermission()
                 CompanionService.start(activity)
+            }
+        }
+    }
+
+    /**
+     * The bundled interface cannot reach the PC on the Wi-Fi (some WebViews
+     * restrict it): use the page the companion serves instead.
+     */
+    @JavascriptInterface
+    fun useCompanionPage() {
+        activity.runOnUiThread {
+            val base = prefs.baseUrl
+            val token = prefs.token
+            if (base != null && token != null && !prefs.isRemote) {
+                activity.webView.loadUrl("$base/#token=$token")
             }
         }
     }

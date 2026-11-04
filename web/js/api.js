@@ -113,16 +113,40 @@ export function setToken(token) {
 }
 
 // A token in the URL fragment (QR code, Android app) wins.
+// Address of the companion when this page does not come from it (the
+// interface bundled in the Android app passes #lan=http://<pc>:<port>), so
+// a new app version updates the interface without updating the PC.
+let lanBase = "";
+const LAN_KEY = "lolmobil.lanBase";
+
+const apiURL = (path) => lanBase + path;
+
 export function takeTokenFromUrl() {
   const match = /(?:^|[#&])token=([0-9a-fA-F]{16,})/.exec(location.hash);
-  if (match) {
-    setToken(match[1]);
-    history.replaceState(null, "", location.pathname + location.search);
+  const lan = /(?:^|[#&])lan=([^&]+)/.exec(location.hash);
+  if (!lan) {
+    // A reload of the bundled page keeps talking to the same PC. (Pages
+    // served by the companion have their own storage: nothing there.)
+    try {
+      lanBase = localStorage.getItem(LAN_KEY) || "";
+    } catch (e) {
+      /* ignore */
+    }
   }
+  if (lan) {
+    lanBase = decodeURIComponent(lan[1]).replace(/\/+$/, "");
+    try {
+      localStorage.setItem(LAN_KEY, lanBase);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  if (match) setToken(match[1]);
+  if (match || lan) history.replaceState(null, "", location.pathname + location.search);
 }
 
 export async function pair(pin) {
-  const res = await fetch("/api/pair", {
+  const res = await fetch(apiURL("/api/pair"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pin, device: navigator.userAgent.slice(0, 80) }),
@@ -153,6 +177,12 @@ let remote = null; // { room, key }
 export async function initConnection() {
   takeTokenFromUrl();
   takeRemoteSecretFromUrl();
+  if (lanBase) {
+    // Bundled interface on the Wi-Fi: talk to the companion directly.
+    mode = "lan";
+    connect();
+    return;
+  }
   const host = await pageHost();
   if (host === "companion") {
     mode = "lan";
@@ -199,13 +229,15 @@ export function connect() {
     return;
   }
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
+  const wsBase = lanBase ? lanBase.replace(/^http/, "ws") : `${proto}://${location.host}`;
+  const ws = new WebSocket(`${wsBase}/ws?token=${encodeURIComponent(token)}`);
   socket = ws;
   setStore({ connection: store.connection === "open" ? "connecting" : store.connection });
   let opened = false;
 
   ws.onopen = () => {
     opened = true;
+    lanFailures = 0;
     retryMs = 800;
     setStore({ connection: "open" });
     if (observed.size) send({ type: "observe", paths: [...observed] });
@@ -228,6 +260,16 @@ export function connect() {
       setToken("");
       setStore({ connection: "unpaired" });
       return;
+    }
+    if (lanBase && !opened) {
+      lanFailures++;
+      const android = window.LolMobilAndroid;
+      // The PC answers but this page cannot reach it: let the app load the
+      // companion's own page instead.
+      if (lanFailures >= 3 && android && android.useCompanionPage && (await companionReachable())) {
+        android.useCompanionPage();
+        return;
+      }
     }
     setStore({ connection: "closed", status: { ...store.status, lcu: false } });
     setTimeout(connect, retryMs);
@@ -357,9 +399,20 @@ function connectRelay() {
   };
 }
 
+let lanFailures = 0;
+
+async function companionReachable() {
+  try {
+    const res = await fetch(apiURL("/api/info"), { cache: "no-store" });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function tokenRejected() {
   try {
-    const res = await fetch(`/api/check?token=${encodeURIComponent(getToken())}`);
+    const res = await fetch(apiURL(`/api/check?token=${encodeURIComponent(getToken())}`));
     return res.status === 401;
   } catch (e) {
     return false;
@@ -525,6 +578,6 @@ export function selectChroma(chroma) {
 // Asset URL served by the companion (images from the client).
 export function asset(path) {
   if (!path) return "";
-  if (path.startsWith("/lol-game-data/assets/")) return isRemoteMode() ? cdragonAsset(path) : "/lcu" + path;
+  if (path.startsWith("/lol-game-data/assets/")) return isRemoteMode() ? cdragonAsset(path) : lanBase + "/lcu" + path;
   return path;
 }

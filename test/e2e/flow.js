@@ -48,7 +48,7 @@ const shot = (p, n) => p.screenshot({ path: `${OUT}/${n}.png` });
   await shot(phone, '04-search');
   await phone.waitForSelector('text=Partie trouvée', { timeout: 10000 });
   await shot(phone, '05-readycheck');
-  await phone.click('button.accept');
+  await phone.click('button.accept'); // the mock refuses the first accept
   await phone.waitForSelector('text=À toi de bannir', { timeout: 10000 });
   await phone.waitForSelector('.champ img');
   await shot(phone, '06-ban');
@@ -179,6 +179,18 @@ const shot = (p, n) => p.screenshot({ path: `${OUT}/${n}.png` });
   await phone.click('text=Trouver une partie');
   await phone.waitForSelector('text=Banc', { timeout: 15000 });
   console.log('auto-accept OK');
+  // Practice tool (custom lobby, "Lancer la partie")
+  await fetch('http://127.0.0.1:29999/mock/goto?state=none');
+  await phone.waitForSelector('text=Outil d\'entraînement', { timeout: 10000 });
+  await phone.click('.mode:has-text("Outil d\'entraînement")');
+  await phone.waitForSelector('h2:has-text("Outil d\'entraînement")', { timeout: 10000 });
+  await shot(phone, '18-practice-lobby');
+  await phone.click('button:has-text("Lancer la partie")');
+  await phone.waitForSelector('text=À toi de choisir', { timeout: 10000 });
+  await phone.click('.champ:has-text("Ahri")');
+  await phone.click('button:has-text("Verrouiller")');
+  await phone.waitForSelector('.tab:has-text("Skins")', { timeout: 10000 });
+  console.log('practice tool OK');
   console.log('ERRORS:', JSON.stringify(errors, null, 1));
   await browser.close();
   if (errors.length) process.exit(1);

@@ -29,12 +29,13 @@ import (
 )
 
 var (
-	port     = flag.Int("port", 29999, "port")
-	password = flag.String("password", "test", "basic auth password (user riot)")
-	withRose = flag.Bool("rose", false, "also imitate Rose's bridge on 127.0.0.1:50000")
-	flaky    = flag.Int("fail-champions", 0, "fail the first N champion list requests (tests the phone's retry)")
-	broker   = flag.String("mqtt", "", "also run a local MQTT broker (WebSocket) on this address, e.g. 127.0.0.1:1884")
-	speed    = flag.Duration("step", 1500*time.Millisecond, "delay of automatic steps (queue pop, other players' picks)")
+	port       = flag.Int("port", 29999, "port")
+	password   = flag.String("password", "test", "basic auth password (user riot)")
+	withRose   = flag.Bool("rose", false, "also imitate Rose's bridge on 127.0.0.1:50000")
+	failAccept = flag.Int("fail-accept", 0, "fail the first N ready check accepts like a real client sometimes does")
+	flaky      = flag.Int("fail-champions", 0, "fail the first N champion list requests (tests the phone's retry)")
+	broker     = flag.String("mqtt", "", "also run a local MQTT broker (WebSocket) on this address, e.g. 127.0.0.1:1884")
+	speed      = flag.Duration("step", 1500*time.Millisecond, "delay of automatic steps (queue pop, other players' picks)")
 )
 
 type mock struct {
@@ -243,6 +244,23 @@ func (m *mock) startChampSelect(aram bool) {
 	}
 	m.emit("/lol-champ-select/v1/session", m.session)
 	m.emit("/lol-champ-select/v1/skin-carousel-skins", m.skins())
+	m.setPhase("ChampSelect")
+}
+
+// startCustomChampSelect: practice tool, blind pick, alone.
+func (m *mock) startCustomChampSelect() {
+	m.myChamp = 0
+	m.skinID = 0
+	me := m.cell(2, 0, "", "")
+	me["spell1Id"], me["spell2Id"] = m.spell1, m.spell2
+	m.session = map[string]any{
+		"localPlayerCellId": 2, "myTeam": []any{me}, "theirTeam": []any{},
+		"bans":   map[string]any{"myTeamBans": []any{}, "theirTeamBans": []any{}, "numBans": 0},
+		"trades": []any{}, "pickOrderSwaps": []any{}, "positionSwaps": []any{},
+		"actions": []any{[]any{map[string]any{"id": 1, "actorCellId": 2, "championId": 0, "completed": false, "isAllyAction": true, "isInProgress": true, "type": "pick"}}},
+		"timer":   map[string]any{"phase": "BAN_PICK", "adjustedTimeLeftInPhase": 90000, "isInfinite": false},
+	}
+	m.emit("/lol-champ-select/v1/session", m.session)
 	m.setPhase("ChampSelect")
 }
 
@@ -565,9 +583,24 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, m.lobby)
 	case "POST /lol-lobby/v2/lobby":
+		if body["isCustom"] == true {
+			// Practice tool / custom game.
+			m.makeLobby(-1)
+			cfg := m.lobby["gameConfig"].(map[string]any)
+			cfg["isCustom"] = true
+			cfg["gameMode"] = "PRACTICETOOL"
+			cfg["showPositionSelector"] = false
+			m.lobby["members"] = m.lobby["members"].([]any)[:1]
+			m.emit("/lol-lobby/v2/lobby", m.lobby)
+			writeJSON(w, 200, m.lobby)
+			return
+		}
 		q, _ := body["queueId"].(float64)
 		m.makeLobby(int(q))
 		writeJSON(w, 200, m.lobby)
+	case "POST /lol-lobby/v1/lobby/custom/start-champ-select":
+		m.startCustomChampSelect()
+		writeJSON(w, 200, map[string]any{"success": true})
 	case "DELETE /lol-lobby/v2/lobby":
 		m.lobby = nil
 		m.emit("/lol-lobby/v2/lobby", nil)
@@ -602,6 +635,12 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, m.ready)
 	case "POST /lol-matchmaking/v1/ready-check/accept":
+		if *failAccept > 0 {
+			// What a real client answered once: the phone must retry.
+			*failAccept--
+			writeJSON(w, 500, map[string]any{"httpStatus": 500, "message": "Failed to accept team builder ready check: Error response for POST /lol-lobby-team-builder/v1/ready-check/accept: Failed to indicate team builder ready check readiness:"})
+			return
+		}
 		m.ready["playerResponse"] = "Accepted"
 		m.emit("/lol-matchmaking/v1/ready-check", m.ready)
 		m.later(*speed, func() {

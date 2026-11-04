@@ -56,6 +56,26 @@ function queueLabelFromId(id) {
   return queueNames.get(id) || "";
 }
 
+// The practice tool is a custom game, created like the client does.
+const PRACTICE_TOOL_LOBBY = {
+  isCustom: true,
+  customGameLobby: {
+    lobbyName: "Outil d'entraînement",
+    lobbyPassword: "",
+    configuration: {
+      gameMode: "PRACTICETOOL",
+      gameMutator: "",
+      gameServerRegion: "",
+      mapId: 11,
+      mutators: { id: 1 },
+      spectatorPolicy: "AllAllowed",
+      teamSize: 5,
+    },
+  },
+};
+
+const CUSTOM_MODES = { PRACTICETOOL: "Outil d'entraînement", CLASSIC: "Partie personnalisée", ARAM: "ARAM personnalisée" };
+
 export function ModePicker({ onPicked, currentQueueId }) {
   const queues = useData(loadQueues);
   const groups = useMemo(() => {
@@ -92,7 +112,21 @@ export function ModePicker({ onPicked, currentQueueId }) {
     }
   };
 
+  const practice = async () => {
+    const ok = await act(lcu("POST", LOBBY, PRACTICE_TOOL_LOBBY));
+    if (ok !== undefined) {
+      refresh(LOBBY);
+      onPicked && onPicked();
+    }
+  };
+
   return html`<div class="modes">
+    <section class="card">
+      <h3>Entraînement</h3>
+      <div class="mode-list">
+        <button class="mode" onClick=${practice}><span>Outil d'entraînement</span></button>
+      </div>
+    </section>
     ${groups.map(
       ([name, list]) => html`<section class="card" key=${name}>
         <h3>${name}</h3>
@@ -209,6 +243,7 @@ function Lobby({ lobby, phase }) {
   const searching = phase === "Matchmaking";
   const queues = useData(loadQueues);
   const queue = queues && queues.find((q) => q.id === config.queueId);
+  const custom = Boolean(config.isCustom);
   const friends = useLcu(FRIENDS);
   const [inviting, setInviting] = useState(false);
   const canInvite = local.isLeader || local.allowedInviteOthers;
@@ -230,7 +265,13 @@ function Lobby({ lobby, phase }) {
       <div class="row space">
         <div>
           <div class="small muted">Salon</div>
-          <h2 class="no-margin">${queue ? queueLabel(queue) : config.gameMode || "Partie"}</h2>
+          <h2 class="no-margin">
+            ${custom
+              ? CUSTOM_MODES[config.gameMode] || config.customLobbyName || "Partie personnalisée"
+              : queue
+              ? queueLabel(queue)
+              : config.gameMode || "Partie"}
+          </h2>
         </div>
         ${local.isLeader &&
         !searching &&
@@ -254,12 +295,21 @@ function Lobby({ lobby, phase }) {
     </section>
     <div class="actions">
       ${!searching &&
+      !custom &&
       html`<button
         class="btn big wide"
         disabled=${!local.isLeader || lobby.canStartActivity === false}
         onClick=${() => act(lcu("POST", "/lol-lobby/v2/lobby/matchmaking/search"))}
       >
         ${local.isLeader ? "Trouver une partie" : "En attente du chef…"}
+      </button>`}
+      ${custom &&
+      html`<button
+        class="btn big wide"
+        disabled=${!local.isLeader}
+        onClick=${() => act(lcu("POST", "/lol-lobby/v1/lobby/custom/start-champ-select"))}
+      >
+        ${local.isLeader ? "Lancer la partie" : "En attente du chef…"}
       </button>`}
       ${!searching &&
       html`<button class="btn secondary wide" onClick=${() => act(lcu("DELETE", LOBBY))}>

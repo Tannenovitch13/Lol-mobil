@@ -18,7 +18,7 @@ go build -o "$WORK/mock-lcu" ./cmd/mock-lcu
 go build -o "$WORK/companion" ./cmd/lolmobil-companion
 
 # -fail-champions: the champion list fails at first, the phone must retry.
-"$WORK/mock-lcu" -rose -step 1s -fail-champions 2 > "$WORK/mock.log" 2>&1 &
+"$WORK/mock-lcu" -rose -step 1s -fail-champions 2 -fail-accept 1 > "$WORK/mock.log" 2>&1 &
 MOCK_PID=$!
 sleep 0.5
 LOLMOBIL_CONFIG_DIR="$WORK/cfg" "$WORK/companion" -lcu-url http://127.0.0.1:29999 -lcu-password test -no-browser -no-plugin-install -remote off \
@@ -34,4 +34,11 @@ PIN="$(node -e "console.log(require('$WORK/cfg/config.json').pin)")"
 OUT="$OUT" PIN="$PIN" PLUGIN="$ROOT/pengu-plugin/LolMobil-Remote/index.js" node "$ROOT/test/e2e/flow.js" || {
   echo "---- companion.log"; cat "$WORK/companion.log"; echo "---- mock.log"; tail -50 "$WORK/mock.log"; exit 1;
 }
+# Interface bundled in the Android app (served elsewhere) on the Wi-Fi.
+python3 -m http.server 8798 --bind 127.0.0.1 --directory "$ROOT/web" > "$WORK/web.log" 2>&1 &
+WEB_PID=$!
+sleep 1
+TOKEN="$(node -e "console.log(require('$WORK/cfg/config.json').token)")"
+TOKEN="$TOKEN" node "$ROOT/test/e2e/bundled.js" || { kill $WEB_PID; exit 1; }
+kill $WEB_PID
 echo "Screenshots: $OUT"

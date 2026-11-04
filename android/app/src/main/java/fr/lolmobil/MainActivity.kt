@@ -45,6 +45,13 @@ class MainActivity : AppCompatActivity() {
         /** The interface bundled in the app, served over https (secure context). */
         const val BUNDLED_HOST = "appassets.androidplatform.net"
         const val BUNDLED_UI = "https://$BUNDLED_HOST/assets/web/index.html"
+
+        /**
+         * The same interface over http, for the Wi-Fi: it talks to the PC
+         * companion (plain http/ws on the local network) without mixed
+         * content. Updating the app updates the interface, not the PC.
+         */
+        const val BUNDLED_UI_LAN = "http://$BUNDLED_HOST/assets/web/index.html"
     }
 
     private lateinit var assetLoader: WebViewAssetLoader
@@ -79,6 +86,7 @@ class MainActivity : AppCompatActivity() {
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
         assetLoader = WebViewAssetLoader.Builder()
+            .setHttpAllowed(true)
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
             .build()
         webView.addJavascriptInterface(WebBridge(this), "LolMobilAndroid")
@@ -147,7 +155,8 @@ class MainActivity : AppCompatActivity() {
                 val brokers = prefs.remoteBrokers?.let { "&m=$it" } ?: ""
                 webView.loadUrl("$BUNDLED_UI#k=$secret$brokers")
             }
-            base != null && token != null -> webView.loadUrl("$base/#token=$token")
+            base != null && token != null ->
+                webView.loadUrl("$BUNDLED_UI_LAN#lan=${Uri.encode(base)}&token=$token")
             else -> {
                 showConnect(null)
                 return
