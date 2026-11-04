@@ -69,13 +69,17 @@ développement, ouvre l'onglet **Actions**, choisis le dernier build réussi, pu
 
 ### 1. Sur le PC
 
-1. Dézippe `LolMobil-Companion-windows-x64.zip` et lance `LolMobil-Companion.exe`.
+1. Dézippe `LolMobil-Companion-windows-x64.zip` et lance `LolMobil-Companion.exe`. Comme Conduit pour
+   Mimic, il ne s'ouvre pas dans une fenêtre : il se place dans la **zone de notification** (à côté de
+   l'horloge). Clic droit sur l'icône : QR code d'appairage, acceptation automatique, **démarrage avec
+   Windows**, journal, Quitter.
    - SmartScreen (« Windows a protégé votre ordinateur ») apparaît parce que le programme n'est pas signé :
      clique sur *Informations complémentaires*, puis sur *Exécuter quand même*.
    - **Pare-feu Windows** : autorise l'accès sur les *réseaux privés*. Sinon, le téléphone ne trouvera pas
      le PC.
-2. La fenêtre affiche l'adresse du PC, un **code d'appairage** à 6 chiffres et un QR code. Au premier
-   lancement, la page `http://127.0.0.1:8787/pair` s'ouvre aussi dans le navigateur.
+2. Au premier lancement, la page `http://127.0.0.1:8787/pair` s'ouvre dans le navigateur. Elle affiche
+   l'adresse du PC, un **code d'appairage** à 6 chiffres et un QR code. Tu peux la rouvrir depuis l'icône
+   (« Connecter un téléphone »).
 3. **Avec Rose** : le compagnon copie le plugin `LolMobil-Remote` dans
    `C:\Program Files\Rose\_internal\Pengu Loader\plugins`. Comme ce dossier est protégé, Windows
    affiche une fois une demande d'autorisation (UAC) : accepte-la, puis **redémarre le client LoL**. La
@@ -83,7 +87,7 @@ développement, ouvre l'onglet **Actions**, choisis le dernier build réussi, pu
    - Pengu Loader installé ailleurs : `LolMobil-Companion.exe -pengu-plugins "D:\...\plugins"` (le chemin
      est retenu), ou copie le dossier `LolMobil-Remote` du zip dans ce dossier `plugins`.
 
-Laisse le compagnon ouvert pendant que tu joues.
+Laisse le compagnon tourner pendant que tu joues (ou coche « Démarrer avec Windows »).
 
 ### 2. Sur le téléphone
 

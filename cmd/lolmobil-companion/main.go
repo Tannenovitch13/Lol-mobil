@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -39,8 +38,7 @@ var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "\nErreur : %v\n", err)
-		pauseOnWindows()
+		showError(err)
 		os.Exit(1)
 	}
 }
@@ -143,9 +141,16 @@ func run() error {
 		installPlugin(cfg)
 	}
 
+	pairURL := fmt.Sprintf("http://127.0.0.1:%d/pair", cfg.Port)
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
 	if err != nil {
-		return fmt.Errorf("impossible d'écouter sur le port %d (le compagnon est peut-être déjà lancé) : %w", cfg.Port, err)
+		if alreadyRunning(cfg.Port) {
+			// Started twice (e.g. from the Start menu): show the pairing page.
+			log.Printf("LolMobil Companion is already running")
+			openBrowser(pairURL)
+			return nil
+		}
+		return fmt.Errorf("impossible d'écouter sur le port %d : %w", cfg.Port, err)
 	}
 	httpServer := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
@@ -183,13 +188,19 @@ func run() error {
 
 	printBanner(srv, cfg)
 
-	pairURL := fmt.Sprintf("http://127.0.0.1:%d/pair", cfg.Port)
 	if *openPair || (firstRun && !*noBrowser) {
 		openBrowser(pairURL)
 		_ = os.WriteFile(filepath.Join(filepath.Dir(cfg.Path()), ".paired-once"), []byte("1"), 0o600)
 	}
 
-	<-ctx.Done()
+	// Windows: icon in the notification area until "Quitter". Elsewhere:
+	// until Ctrl+C.
+	runUI(ctx, stop, uiOptions{
+		srv:     srv,
+		cfg:     cfg,
+		pairURL: pairURL,
+		logPath: filepath.Join(filepath.Dir(cfg.Path()), "companion.log"),
+	})
 	log.Printf("Arrêt...")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -235,11 +246,10 @@ func installPluginOnly(dir string, port int) error {
 		return err
 	}
 	if changed {
-		fmt.Printf("Plugin LolMobil-Remote installé dans %s.\nRedémarre le client LoL pour le charger.\n", dir)
+		notifyUser("LolMobil", fmt.Sprintf("Plugin LolMobil-Remote installé dans %s.\nRedémarre le client LoL pour le charger.", dir))
 	} else {
-		fmt.Printf("Plugin LolMobil-Remote déjà à jour dans %s.\n", dir)
+		notifyUser("LolMobil", fmt.Sprintf("Plugin LolMobil-Remote déjà à jour dans %s.", dir))
 	}
-	time.Sleep(4 * time.Second)
 	return nil
 }
 
@@ -281,7 +291,7 @@ func printBanner(srv *server.Server, cfg *config.Config) {
 		fmt.Println("  Accès à distance : désactivé (voir -relay dans le README).")
 		fmt.Println()
 	}
-	fmt.Println("  Laisse cette fenêtre ouverte pendant que tu joues. Ctrl+C pour quitter.")
+	fmt.Println("  Laisse le compagnon ouvert pendant que tu joues. Ctrl+C pour quitter.")
 	fmt.Println("==============================================================")
 	fmt.Println()
 }
@@ -295,8 +305,30 @@ func setupLogging(dir string) {
 	if err != nil {
 		return
 	}
-	log.SetOutput(io.MultiWriter(os.Stdout, f))
+	log.SetOutput(teeWriter{f, os.Stdout})
 	log.SetFlags(log.Ltime)
+}
+
+// teeWriter writes to the log file and, when there is one, the console
+// (the Windows build has no console: errors there are ignored).
+type teeWriter struct{ file, console io.Writer }
+
+func (t teeWriter) Write(p []byte) (int, error) {
+	n, err := t.file.Write(p)
+	_, _ = t.console.Write(p)
+	return n, err
+}
+
+// alreadyRunning reports whether a companion answers on this port.
+func alreadyRunning(port int) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/info", port))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return strings.Contains(string(body), `"lolmobil"`)
 }
 
 func openBrowser(url string) {
@@ -312,12 +344,4 @@ func openBrowser(url string) {
 	_ = cmd.Start()
 }
 
-// pauseOnWindows keeps the console open after an error when the program was
-// started by double-click.
-func pauseOnWindows() {
-	if runtime.GOOS != "windows" {
-		return
-	}
-	fmt.Fprintln(os.Stderr, "Appuie sur Entrée pour fermer.")
-	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
-}
+

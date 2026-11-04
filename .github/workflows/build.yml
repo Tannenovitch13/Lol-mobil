@@ -33,9 +33,10 @@ jobs:
           mkdir -p dist
           build() {
             GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath \
-              -ldflags "-s -w -X main.version=${VERSION}" -o "$3" ./cmd/lolmobil-companion
+              -ldflags "-s -w -X main.version=${VERSION} $4" -o "$3" ./cmd/lolmobil-companion
           }
-          build windows amd64 "pkg/windows/LolMobil-Companion.exe"
+          # Windows: no console window, the companion lives in the notification area.
+          build windows amd64 "pkg/windows/LolMobil-Companion.exe" "-H=windowsgui"
           build darwin arm64 "pkg/macos-arm64/lolmobil-companion"
           build darwin amd64 "pkg/macos-x64/lolmobil-companion"
           build linux amd64 "pkg/linux-x64/lolmobil-companion"

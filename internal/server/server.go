@@ -558,13 +558,10 @@ func (s *Server) sendSnapshots(c *client, paths []string) {
 
 func (c *client) handleSettings(msg inbound) {
 	if msg.AutoAccept != nil {
-		v := *msg.AutoAccept
-		if err := c.s.Cfg.Update(func(cfg *config.Config) { cfg.AutoAccept = v }); err != nil {
-			log.Printf("[Config] Could not save: %v", err)
-		}
-		log.Printf("[Config] Auto-accept: %v", v)
+		c.s.SetAutoAccept(*msg.AutoAccept)
+	} else {
+		c.s.broadcast(map[string]any{"type": "settings", "settings": c.s.settings()})
 	}
-	c.s.broadcast(map[string]any{"type": "settings", "settings": c.s.settings()})
 	if msg.ID != 0 {
 		c.respond(msg.ID, 200, mustJSON(c.s.settings()), "")
 	}
@@ -719,6 +716,36 @@ func (s *Server) helloMessage(c *client) map[string]any {
 		"settings": s.settings(),
 		"rose":     s.Rose.Snapshot(),
 	}
+}
+
+// Summary is what the tray icon shows.
+type Summary struct {
+	LCU, Rose, Plugin, Relay bool
+	Phones                   int
+}
+
+// Summary returns the current connection state.
+func (s *Server) Summary() Summary {
+	pluginOK, _ := s.Plugin.Connected()
+	s.mu.Lock()
+	phones := len(s.clients)
+	s.mu.Unlock()
+	return Summary{
+		LCU:    s.LCU.Client() != nil,
+		Rose:   s.Rose.Connected(),
+		Plugin: pluginOK,
+		Relay:  s.RelayConnected != nil && s.RelayConnected(),
+		Phones: phones,
+	}
+}
+
+// SetAutoAccept changes the auto-accept option and tells the phones.
+func (s *Server) SetAutoAccept(v bool) {
+	if err := s.Cfg.Update(func(cfg *config.Config) { cfg.AutoAccept = v }); err != nil {
+		log.Printf("[Config] Could not save: %v", err)
+	}
+	log.Printf("[Config] Auto-accept: %v", v)
+	s.broadcast(map[string]any{"type": "settings", "settings": s.settings()})
 }
 
 // BroadcastStatus tells every phone what is connected.

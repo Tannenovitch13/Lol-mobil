@@ -5,7 +5,11 @@ Pilote le client League of Legends depuis ton téléphone : choix du mode,
 file d'attente, acceptation des parties, bans/picks, skins (compatible Rose),
 runes et sorts.
 
-1. Lance LolMobil-Companion.exe et laisse la fenêtre ouverte.
+1. Lance LolMobil-Companion.exe. Il n'ouvre pas de fenêtre : il se place
+   dans la zone de notification (à côté de l'horloge, flèche ^). Clic droit
+   sur l'icône : QR code d'appairage, acceptation automatique, démarrage
+   avec Windows, journal, Quitter. Au premier lancement, la page avec le
+   QR code et le code d'appairage s'ouvre dans le navigateur.
    - Windows peut afficher « Windows a protégé votre ordinateur » (programme
      non signé) : « Informations complémentaires » puis « Exécuter quand même ».
    - Le pare-feu Windows demande l'accès réseau : coche « Réseaux privés »
@@ -25,6 +29,11 @@ runes et sorts.
    (UAC) : accepte, puis redémarre le client LoL.
    Installation manuelle : copie le dossier LolMobil-Remote de ce zip dans le
    dossier « plugins » de Pengu Loader.
+
+4. Accès à distance (4G), optionnel : déploie le relais gratuit (voir
+   relay/README.md sur GitHub), puis lance une fois
+   LolMobil-Companion.exe -relay https://lolmobil-relay.<ton-nom>.workers.dev
+   et scanne le QR code « Accès à distance » de la page d'appairage.
 
 Options utiles (dans un terminal) :
   LolMobil-Companion.exe -pair              ouvre la page avec le QR code
