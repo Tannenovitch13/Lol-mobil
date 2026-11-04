@@ -87,7 +87,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame && request.url.scheme == "http") {
+                if (request.isForMainFrame && (request.url.scheme == "http" || request.url.scheme == "https")) {
                     showConnect("unreachable")
                 }
             }
@@ -125,11 +125,12 @@ class MainActivity : AppCompatActivity() {
     fun openCompanion() {
         val base = prefs.baseUrl
         val token = prefs.token
-        if (base == null || token == null) {
+        if (base == null || (token == null && !prefs.isRemote)) {
             showConnect(null)
             return
         }
-        webView.loadUrl("$base/#token=$token")
+        val secret = prefs.remoteSecret
+        webView.loadUrl(if (secret != null) "$base/#k=$secret" else "$base/#token=$token")
         if (prefs.notifications) {
             ensureNotificationPermission()
             CompanionService.start(this)
@@ -160,8 +161,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** The QR code holds http://<pc>:<port>/#token=<token>. */
+    /**
+     * Wi-Fi QR code: http://<pc>:<port>/#token=<token>.
+     * Remote access QR code: https://<relay>/#k=<secret>.
+     */
     private fun handleScanned(text: String) {
+        val link = Remote.parseLink(text)
+        if (link != null) {
+            connectRemote(link)
+            return
+        }
         val uri = Uri.parse(text.trim())
         val token = Regex("token=([0-9a-fA-F]{16,})").find(uri.fragment ?: text)?.groupValues?.get(1)
         val host = uri.host
@@ -181,6 +190,19 @@ class MainActivity : AppCompatActivity() {
                 main.post { openCompanion() }
             } catch (e: Exception) {
                 jsCallback("onQrResult", JSONObject().put("error", e.message ?: "Le PC ne répond pas"))
+            }
+        }
+    }
+
+    fun connectRemote(link: Remote.Link) {
+        thread {
+            try {
+                Remote(link.secret)
+                Net.checkRelay(link.baseUrl)
+                prefs.saveRemote(link.baseUrl, link.secret)
+                main.post { openCompanion() }
+            } catch (e: Exception) {
+                jsCallback("onQrResult", JSONObject().put("error", e.message ?: "Le relais ne répond pas"))
             }
         }
     }

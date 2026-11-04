@@ -1,7 +1,7 @@
 // Static game data read from the client (champions, spells, runes, queues),
 // cached for the session.
 
-import { get, useStore } from "./api.js";
+import { asset, get, useStore } from "./api.js";
 import { useEffect, useState } from "../vendor/preact-htm.js";
 
 const cache = new Map();
@@ -86,16 +86,16 @@ export function positionLabel(pos) {
 }
 
 export const championIcon = (id) =>
-  id > 0 ? `/lcu/lol-game-data/assets/v1/champion-icons/${id}.png` : "";
+  id > 0 ? asset(`/lol-game-data/assets/v1/champion-icons/${id}.png`) : "";
 
 export const profileIcon = (id) =>
-  id >= 0 ? `/lcu/lol-game-data/assets/v1/profile-icons/${id}.jpg` : "";
+  id >= 0 && id !== undefined && id !== null ? asset(`/lol-game-data/assets/v1/profile-icons/${id}.jpg`) : "";
 
 // Accent/case-insensitive search key.
 export function searchKey(text) {
   return String(text || "")
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]/gi, "")
     .toLowerCase();
 }

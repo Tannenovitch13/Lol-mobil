@@ -65,6 +65,22 @@ object Net {
         }
     }
 
+    /** Checks that a URL is a LolMobil relay. */
+    @Throws(IOException::class)
+    fun checkRelay(base: String) {
+        val request = Request.Builder().url("$base/relay-info").build()
+        client.newCall(request).execute().use { response ->
+            val ok = response.isSuccessful &&
+                (response.body?.string() ?: "").contains("lolmobil-relay")
+            if (!ok) throw IOException("Ce lien ne mène pas à un relais LolMobil")
+        }
+    }
+
+    /** Client for the relay socket: keepalive is an application "ping". */
+    val relayClient: OkHttpClient by lazy {
+        client.newBuilder().pingInterval(0, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS).build()
+    }
+
     /** Accepts or declines the current match ("accept" / "decline"). */
     @Throws(IOException::class)
     fun readyCheck(base: String, token: String, action: String) {

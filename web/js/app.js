@@ -8,12 +8,14 @@ import {
   saveSettings,
   setToken,
   store,
-  takeTokenFromUrl,
+  initConnection,
+  isRemoteMode,
   toast,
   useLcu,
   useStore,
 } from "./api.js";
 import { clearDataCache, profileIcon } from "./data.js";
+import { forgetRemoteSecret } from "./remote.js";
 import { Home } from "./home.js";
 import { ReadyCheck } from "./readycheck.js";
 import { ChampSelect } from "./champselect.js";
@@ -68,6 +70,7 @@ function Settings({ onClose }) {
   const status = useStore((s) => s.status);
   const pcName = useStore((s) => s.pcName);
   const version = useStore((s) => s.version);
+  const remoteMode = useStore((s) => s.remote);
   const android = window.LolMobilAndroid;
   return html`<div class="sheet-backdrop" onClick=${onClose}>
     <div class="sheet" onClick=${(e) => e.stopPropagation()}>
@@ -85,6 +88,9 @@ function Settings({ onClose }) {
       </label>
       <div class="info-block">
         <div>PC : <b>${pcName || "?"}</b> · compagnon ${version}</div>
+        <div>Connexion : ${remoteMode ? "à distance (relais, chiffrée)" : "Wi-Fi local"}</div>
+        ${!remoteMode &&
+        html`<div>Accès à distance : ${status.relay ? "prêt ✓" : "non configuré"}</div>`}
         <div>Rose : ${status.rose ? "connecté ✓" : "non détecté"}</div>
         <div>
           Plugin LolMobil-Remote :
@@ -106,6 +112,7 @@ function Settings({ onClose }) {
         class="btn secondary wide"
         onClick=${() => {
           setToken("");
+          forgetRemoteSecret();
           location.reload();
         }}
       >
@@ -144,6 +151,17 @@ function AndroidSettings({ android }) {
       Autoriser LolMobil en arrière-plan (batterie)
     </button>`}
   </div>`;
+}
+
+function RemotePairScreen() {
+  return html`<main class="center-screen">
+    <h1 class="logo">LolMobil</h1>
+    <p>Accès à distance</p>
+    <p class="muted">
+      Sur le PC, ouvre la page du compagnon (http://127.0.0.1:8787/pair) et scanne le QR code « Accès à
+      distance » avec ce téléphone, ou ouvre le lien affiché dans la fenêtre du compagnon.
+    </p>
+  </main>`;
 }
 
 function PairScreen() {
@@ -229,7 +247,12 @@ function Router() {
     if (!lcuOk) clearDataCache();
   }, [lcuOk]);
 
-  if (connection === "unpaired") return html`<${PairScreen} />`;
+  if (connection === "unpaired") return isRemoteMode() ? html`<${RemotePairScreen} />` : html`<${PairScreen} />`;
+  if (connection === "pc-offline")
+    return html`<${Waiting}
+      title="Ton PC est hors ligne"
+      text="Le relais est joignable, mais LolMobil Companion n'y est pas connecté. Lance-le sur le PC (avec l'option -relay)."
+    />`;
   if (connection !== "open")
     return html`<${Waiting}
       title="Connexion au PC…"
@@ -280,9 +303,8 @@ function App() {
 
 window.onAndroidNotice = (msg) => toast(msg && msg.text ? msg.text : String(msg));
 
-takeTokenFromUrl();
-connect();
 render(html`<${App} />`, document.getElementById("app"));
+initConnection();
 
 // Exposed for debugging from the console.
 window.lolmobil = { store };

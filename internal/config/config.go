@@ -4,6 +4,7 @@ package config
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -31,6 +32,11 @@ type Config struct {
 	// PenguPluginsDir is an optional Pengu Loader plugins folder where the
 	// LolMobil-Remote plugin is installed. Detected (Rose) when empty.
 	PenguPluginsDir string `json:"penguPluginsDir,omitempty"`
+	// RelayURL is the LolMobil relay used for remote access (empty: Wi-Fi
+	// only). See relay/.
+	RelayURL string `json:"relayUrl,omitempty"`
+	// RemoteSecret encrypts the traffic through the relay end to end.
+	RemoteSecret string `json:"remoteSecret"`
 
 	path string
 	mu   sync.Mutex
@@ -84,6 +90,10 @@ func Load() (*Config, error) {
 		c.PIN = NewPIN()
 		changed = true
 	}
+	if len(c.RemoteSecret) != 43 {
+		c.RemoteSecret = NewRemoteSecret()
+		changed = true
+	}
 	if changed {
 		if err := c.Save(); err != nil {
 			return nil, err
@@ -132,6 +142,15 @@ func NewToken() string {
 		panic(err)
 	}
 	return hex.EncodeToString(b)
+}
+
+// NewRemoteSecret returns 32 random bytes, base64url without padding.
+func NewRemoteSecret() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // NewPIN returns a random 6-digit code.

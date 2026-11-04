@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/tannenovitch13/lol-mobil/internal/config"
 	"github.com/tannenovitch13/lol-mobil/internal/lcu"
 	"github.com/tannenovitch13/lol-mobil/internal/pengu"
+	"github.com/tannenovitch13/lol-mobil/internal/relay"
 	"github.com/tannenovitch13/lol-mobil/internal/rose"
 	"github.com/tannenovitch13/lol-mobil/internal/server"
 )
@@ -57,6 +59,7 @@ func run() error {
 		showVersion   = flag.Bool("version", false, "print the version and exit")
 		roseDisabled  = flag.Bool("no-rose", false, "do not connect to Rose")
 		discoveryPort = flag.Int("discovery-port", 0, "UDP port for automatic discovery (default: port+1)")
+		relayURL      = flag.String("relay", "", "relay URL for remote access, e.g. https://lolmobil-relay.<you>.workers.dev (saved; \"off\" disables)")
 		installOnly   = flag.Bool("install-plugin-only", false, "install the plugin into -pengu-plugins with -port, then exit (used for the administrator prompt)")
 	)
 	flag.Parse()
@@ -89,6 +92,14 @@ func run() error {
 		if *resetPairing {
 			c.Token = config.NewToken()
 			c.PIN = config.NewPIN()
+			c.RemoteSecret = config.NewRemoteSecret()
+		}
+		switch *relayURL {
+		case "":
+		case "off":
+			c.RelayURL = ""
+		default:
+			c.RelayURL = strings.TrimRight(*relayURL, "/")
 		}
 	}); err != nil {
 		return err
@@ -152,6 +163,22 @@ func run() error {
 	go connector.Run(ctx)
 	if !*roseDisabled {
 		go bridge.Run(ctx)
+	}
+	if cfg.RelayURL != "" {
+		keys, err := relay.DeriveKeys(cfg.RemoteSecret)
+		if err != nil {
+			return err
+		}
+		host := &relay.Host{
+			URL:  cfg.RelayURL,
+			Keys: keys,
+			NewSession: func(id string, send func([]byte) error) relay.Session {
+				return srv.NewRelaySession(id, send)
+			},
+			OnStatus: func(bool) { srv.BroadcastStatus() },
+		}
+		srv.RelayConnected = host.Connected
+		go host.Run(ctx)
 	}
 
 	printBanner(srv, cfg)
@@ -243,6 +270,16 @@ func printBanner(srv *server.Server, cfg *config.Config) {
 			BlackWhiteChar: qrterminal.BLACK_WHITE,
 			QuietZone:      2,
 		})
+	}
+	if link := srv.RemoteURL(); link != "" {
+		fmt.Println("  Accès à distance (4G) : ouvre une fois ce lien sur le téléphone,")
+		fmt.Println("  ou scanne le 2e QR code de la page ci-dessus :")
+		fmt.Println("  " + link)
+		fmt.Println("  Garde ce lien secret : il donne le contrôle de ton client LoL.")
+		fmt.Println()
+	} else {
+		fmt.Println("  Accès à distance : désactivé (voir -relay dans le README).")
+		fmt.Println()
 	}
 	fmt.Println("  Laisse cette fenêtre ouverte pendant que tu joues. Ctrl+C pour quitter.")
 	fmt.Println("==============================================================")

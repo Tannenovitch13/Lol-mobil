@@ -33,6 +33,9 @@ type Server struct {
 	Web     fs.FS
 	Version string
 	Name    string // shown on the phone (PC name)
+	// RelayConnected reports whether remote access through the relay is up
+	// (nil when no relay is configured).
+	RelayConnected func() bool
 
 	mu      sync.Mutex
 	clients map[*client]struct{}
@@ -44,9 +47,12 @@ type Server struct {
 	readyAccepted bool
 }
 
+// client is one connected phone, on the Wi-Fi (websocket) or through the
+// relay. Messages to the phone go through send; a transport-specific writer
+// drains it.
 type client struct {
 	s        *Server
-	conn     *websocket.Conn
+	remote   bool
 	send     chan []byte
 	mu       sync.Mutex
 	observed []string
@@ -68,6 +74,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/plugin", s.Plugin)
 	mux.HandleFunc("/lcu/", s.serveAsset)
 	mux.HandleFunc("/api/info", s.serveInfo)
+	// The page asks this to know whether a relay or the companion serves it.
+	mux.HandleFunc("/relay-info", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"app": "lolmobil-companion"})
+	})
 	mux.HandleFunc("/api/pair", s.servePair)
 	mux.HandleFunc("/api/check", s.serveCheck)
 	mux.HandleFunc("/api/ready-check/", s.serveReadyCheck)
@@ -252,24 +262,62 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(1 << 20)
-	c := &client{s: s, conn: conn, send: make(chan []byte, 512)}
+	c := s.addClient(false)
+	log.Printf("[Phone] Connected: %s", r.RemoteAddr)
+	go wsWriter(conn, c.send)
+	c.sendJSON(s.helloMessage(c))
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+		c.handle(data)
+	}
+	s.dropClient(c)
+	log.Printf("[Phone] Disconnected: %s", r.RemoteAddr)
+}
+
+func (s *Server) addClient(remote bool) *client {
+	c := &client{s: s, remote: remote, send: make(chan []byte, 512)}
 	s.mu.Lock()
 	if s.clients == nil {
 		s.clients = map[*client]struct{}{}
 	}
 	s.clients[c] = struct{}{}
 	s.mu.Unlock()
-	log.Printf("[Phone] Connected: %s", r.RemoteAddr)
+	return c
+}
 
-	go c.writeLoop()
-	c.sendJSON(s.helloMessage())
-	c.readLoop()
-
+func (s *Server) dropClient(c *client) {
 	s.mu.Lock()
 	delete(s.clients, c)
 	s.mu.Unlock()
 	c.close()
-	log.Printf("[Phone] Disconnected: %s", r.RemoteAddr)
+}
+
+// relaySession is a phone connected through the relay.
+type relaySession struct{ c *client }
+
+func (r relaySession) Deliver(data []byte) { r.c.handle(data) }
+func (r relaySession) Close() {
+	r.c.s.dropClient(r.c)
+	log.Printf("[Phone] Remote phone disconnected")
+}
+
+// NewRelaySession registers a phone that joined through the relay. send
+// encrypts and writes one message to it.
+func (s *Server) NewRelaySession(id string, send func([]byte) error) relaySession {
+	c := s.addClient(true)
+	log.Printf("[Phone] Remote phone connected (%s)", id)
+	go func() {
+		for data := range c.send {
+			if err := send(data); err != nil {
+				return
+			}
+		}
+	}()
+	c.sendJSON(s.helloMessage(c))
+	return relaySession{c}
 }
 
 func (c *client) close() {
@@ -304,24 +352,25 @@ func (c *client) sendJSON(v any) {
 	c.sendRaw(data)
 }
 
-func (c *client) writeLoop() {
+// wsWriter writes a phone's messages to its websocket (Wi-Fi mode).
+func wsWriter(conn *websocket.Conn, send chan []byte) {
 	ping := time.NewTicker(25 * time.Second)
 	defer ping.Stop()
-	defer c.conn.Close()
+	defer conn.Close()
 	for {
 		select {
-		case data, ok := <-c.send:
+		case data, ok := <-send:
 			if !ok {
-				_ = c.conn.WriteMessage(websocket.CloseMessage, nil)
+				_ = conn.WriteMessage(websocket.CloseMessage, nil)
 				return
 			}
-			_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				return
 			}
 		case <-ping.C:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		}
@@ -350,32 +399,27 @@ type inbound struct {
 	AutoAccept *bool `json:"autoAccept"`
 }
 
-func (c *client) readLoop() {
-	for {
-		_, data, err := c.conn.ReadMessage()
-		if err != nil {
-			return
-		}
-		var msg inbound
-		if json.Unmarshal(data, &msg) != nil {
-			continue
-		}
-		switch msg.Type {
-		case "ping":
-			c.sendJSON(map[string]any{"type": "pong", "id": msg.ID})
-		case "request":
-			go c.handleRequest(msg)
-		case "observe":
-			c.handleObserve(msg.Paths)
-		case "unobserve":
-			c.handleUnobserve(msg.Paths)
-		case "select-skin":
-			go c.handleSelectSkin(msg)
-		case "select-chroma":
-			go c.handleSelectChroma(msg)
-		case "settings":
-			c.handleSettings(msg)
-		}
+// handle processes one message from the phone.
+func (c *client) handle(data []byte) {
+	var msg inbound
+	if json.Unmarshal(data, &msg) != nil {
+		return
+	}
+	switch msg.Type {
+	case "ping":
+		c.sendJSON(map[string]any{"type": "pong", "id": msg.ID})
+	case "request":
+		go c.handleRequest(msg)
+	case "observe":
+		c.handleObserve(msg.Paths)
+	case "unobserve":
+		c.handleUnobserve(msg.Paths)
+	case "select-skin":
+		go c.handleSelectSkin(msg)
+	case "select-chroma":
+		go c.handleSelectChroma(msg)
+	case "settings":
+		c.handleSettings(msg)
 	}
 }
 
@@ -661,14 +705,16 @@ func (s *Server) statusMessage() map[string]any {
 		"rose":          s.Rose.Connected(),
 		"plugin":        pluginOK,
 		"pluginVersion": pluginVersion,
+		"relay":         s.RelayConnected != nil && s.RelayConnected(),
 	}
 }
 
-func (s *Server) helloMessage() map[string]any {
+func (s *Server) helloMessage(c *client) map[string]any {
 	return map[string]any{
 		"type":     "hello",
 		"version":  s.Version,
 		"name":     s.Name,
+		"remote":   c.remote,
 		"status":   s.statusMessage(),
 		"settings": s.settings(),
 		"rose":     s.Rose.Snapshot(),

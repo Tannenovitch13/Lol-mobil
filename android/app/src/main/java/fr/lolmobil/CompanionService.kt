@@ -40,6 +40,9 @@ class CompanionService : Service() {
         const val ID_READY = 2
         const val ID_TURN = 3
         const val ACTION_STOP = "fr.lolmobil.STOP_SERVICE"
+        /** Accept/decline through the service's socket (remote access). */
+        const val ACTION_READY = "fr.lolmobil.READY_CHECK"
+        const val EXTRA_READY_ACTION = "action"
 
         private const val URI_READY = "/lol-matchmaking/v1/ready-check"
         private const val URI_PHASE = "/lol-gameflow/v1/gameflow-phase"
@@ -113,6 +116,8 @@ class CompanionService : Service() {
     private var phase: String? = null
     private var readyShown = false
     private var lastTurnActionId = -1
+    private var remote: Remote? = null
+    private var nextRequestId = 1
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -134,6 +139,9 @@ class CompanionService : Service() {
             return START_NOT_STICKY
         }
         if (socket == null) connect()
+        if (intent?.action == ACTION_READY) {
+            sendReadyCheck(intent.getStringExtra(EXTRA_READY_ACTION) ?: "accept")
+        }
         return START_STICKY
     }
 
@@ -157,28 +165,65 @@ class CompanionService : Service() {
 
     private fun connect() {
         val base = prefs.baseUrl ?: return
+        val secret = prefs.remoteSecret
+        if (secret != null) {
+            // Remote access: phone side of the relay room, end-to-end encrypted.
+            val r = try {
+                Remote(secret)
+            } catch (e: Exception) {
+                stopSelf()
+                return
+            }
+            remote = r
+            val request = Request.Builder().url(Remote.clientUrl(base, r.roomId)).build()
+            socket = Net.relayClient.newWebSocket(request, Listener())
+            return
+        }
+        remote = null
         val token = prefs.token ?: return
         val url = base.replaceFirst("http", "ws") + "/ws?token=" + Uri.encode(token)
         val request = Request.Builder().url(url).build()
         socket = Net.client.newWebSocket(request, Listener())
     }
 
+    private fun observeMessage(): JSONObject = JSONObject()
+        .put("type", "observe")
+        .put("paths", JSONArray(listOf(URI_READY, URI_PHASE, URI_SESSION)))
+
+    /** Sends a message to the companion (encrypted in remote mode). */
+    private fun sendMessage(message: JSONObject): Boolean {
+        val ws = socket ?: return false
+        val text = message.toString()
+        return ws.send(remote?.seal(text) ?: text)
+    }
+
+    private val relayPing = object : Runnable {
+        override fun run() {
+            if (stopped) return
+            if (remote != null) socket?.send("ping")
+            handler.postDelayed(this, 25_000L)
+        }
+    }
+
     private inner class Listener : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            val observe = JSONObject()
-                .put("type", "observe")
-                .put("paths", JSONArray(listOf(URI_READY, URI_PHASE, URI_SESSION)))
-            webSocket.send(observe.toString())
             handler.post {
                 if (socket !== webSocket) return@post
                 retryMs = 1000L
-                connected = true
-                updateStatus()
+                if (remote == null) {
+                    // Wi-Fi: the companion is right there.
+                    sendMessage(observeMessage())
+                    connected = true
+                    updateStatus()
+                } else {
+                    handler.removeCallbacks(relayPing)
+                    handler.postDelayed(relayPing, 25_000L)
+                }
             }
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            handler.post { if (socket === webSocket) handle(text) }
+            handler.post { if (socket === webSocket) receive(text) }
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -205,6 +250,45 @@ class CompanionService : Service() {
         updateStatus()
         handler.postDelayed({ if (!stopped && socket == null) connect() }, retryMs)
         retryMs = (retryMs * 2).coerceAtMost(30_000L)
+    }
+
+    private fun receive(text: String) {
+        val r = remote
+        if (r == null) {
+            handle(text)
+            return
+        }
+        if (text == "pong") return
+        if (text.startsWith("{")) {
+            // Relay control frame: is the PC connected to the relay?
+            val frame = try {
+                JSONObject(text)
+            } catch (e: Exception) {
+                return
+            }
+            if (frame.optString("t") == "host") {
+                connected = frame.optBoolean("online")
+                if (connected) sendMessage(observeMessage()) else lcuConnected = false
+                updateStatus()
+            }
+            return
+        }
+        r.open(text)?.let { handle(it) }
+    }
+
+    private fun sendReadyCheck(action: String) {
+        val sent = connected && sendMessage(
+            JSONObject()
+                .put("type", "request")
+                .put("id", nextRequestId++)
+                .put("method", "POST")
+                .put("path", "$URI_READY/$action")
+        )
+        when {
+            !sent -> showReadyResult("Échec", "Pas connecté au PC")
+            action == "accept" -> showReadyResult("Partie acceptée ✓", "En attente des autres joueurs…")
+            else -> cancelReady()
+        }
     }
 
     private fun handle(text: String) {
@@ -290,6 +374,7 @@ class CompanionService : Service() {
     private fun statusNotification(): Notification {
         val pc = prefs.pcName?.takeIf { it.isNotEmpty() } ?: "PC"
         val text = when {
+            !connected && remote != null && socket != null -> "PC hors ligne (relais)"
             !connected -> "Connexion à $pc…"
             !lcuConnected -> "Connecté · client LoL fermé"
             else -> "Connecté · ${phaseLabel()}"
@@ -342,7 +427,7 @@ class CompanionService : Service() {
     }
 
     private fun showReadyResult(title: String, text: String) {
-        if (!readyShown) return
+        if (!readyShown && title != "Échec") return
         val notification = NotificationCompat.Builder(this, CHANNEL_MATCH)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)

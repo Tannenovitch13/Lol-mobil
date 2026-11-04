@@ -27,10 +27,12 @@ le téléphone, tu peux choisir n'importe quel skin, même non possédé, et Ros
 | **Skins** | tous les skins du champion. Ceux que tu possèdes sont sélectionnés par le client. **Avec Rose, ceux que tu ne possèdes pas aussi**, ainsi que les chromas |
 | **Runes** | choix de la page active, éditeur complet (arbres, runes, fragments), **pages recommandées** du client en un clic |
 | **Sorts** | choix des deux sorts d'invocateur (filtrés selon le mode) |
+| **Salon et amis** | inviter des amis en ligne, des joueurs suggérés ou un Riot ID, nommer chef, exclure, donner ou retirer le droit d'inviter |
 | **Après la partie** | Rejouer / retour à l'accueil, reconnexion si tu es déconnecté |
+| **Accès à distance** | depuis la 4G ou n'importe quel réseau, via un relais gratuit que tu déploies sur Cloudflare (l'équivalent de *Rift* dans Mimic). Les échanges sont chiffrés de bout en bout |
 
-Tout reste sur ton réseau local : le téléphone parle au PC, le PC parle au client LoL. Rien ne passe par
-Internet.
+Par défaut, tout reste sur ton réseau local : le téléphone parle au PC, et le PC parle au client LoL.
+L'accès à distance est optionnel ; même avec, le relais ne voit que des données chiffrées.
 
 ## Comment ça marche
 
@@ -95,8 +97,15 @@ Laisse le compagnon ouvert pendant que tu joues.
   code. Tu peux ajouter la page à l'écran d'accueil. Les notifications en arrière-plan sont réservées à
   l'appli Android.
 
-Le téléphone doit être sur le **même réseau** que le PC. Pour jouer depuis l'extérieur (4G), un VPN
-personnel comme [Tailscale](https://tailscale.com) fonctionne : utilise l'adresse Tailscale du PC.
+Le téléphone doit être sur le **même réseau** que le PC, sauf si tu actives l'accès à distance.
+
+### 3. Accès à distance (optionnel, comme Mimic)
+
+Déploie ton relais gratuit sur Cloudflare (un bouton ou deux commandes), puis lance le compagnon une fois
+avec `-relay https://lolmobil-relay.<ton-nom>.workers.dev`. Scanne ensuite le QR code « Accès à
+distance » de la page du compagnon : tout est expliqué dans [`relay/README.md`](relay/README.md).
+Autre possibilité : un VPN personnel comme [Tailscale](https://tailscale.com), avec l'adresse Tailscale du
+PC.
 
 ## Options du compagnon
 
@@ -108,6 +117,7 @@ personnel comme [Tailscale](https://tailscale.com) fonctionne : utilise l'adress
 -pengu-plugins DIR    dossier plugins de Pengu Loader où installer LolMobil-Remote
 -no-plugin-install    ne pas installer le plugin
 -no-rose              ne pas se connecter à Rose
+-relay URL            relais pour l'accès à distance (retenu ; "off" pour désactiver)
 ```
 
 La configuration (`config.json`) et le journal (`companion.log`) se trouvent dans `%APPDATA%\LolMobil\`.
@@ -157,6 +167,7 @@ Structure :
 | `internal/rose` | connexion au pont WebSocket de Rose |
 | `internal/pengu` | canal avec le plugin et installation dans Pengu Loader / Rose |
 | `internal/server` | serveur du téléphone : appairage, relais, découverte UDP, images |
+| `internal/relay`, `relay/` | accès à distance : client du relais (Go) et relais Cloudflare Worker |
 | `web/` | interface mobile (embarquée dans l'exécutable) |
 | `pengu-plugin/LolMobil-Remote` | plugin Pengu Loader qui pilote le carrousel de skins |
 | `android/` | appli Android : connexion, découverte, QR code, notifications |
@@ -170,7 +181,9 @@ dessus les précédents. Cette clé est publique, donc n'importe qui peut signer
 ## Crédits
 
 - [Mimic](https://github.com/molenzwiebel/Mimic) de molenzwiebel (MIT) : la première télécommande LoL
-  sur téléphone, dont LolMobil reprend l'idée. Mimic n'est plus maintenu depuis 2022.
+  sur téléphone. Mimic n'est plus maintenu depuis 2022 et son relais Rift n'existe plus. LolMobil le
+  recode à jour : mêmes fonctions (salon, invitations, file, sélection, runes, accès à distance chiffré,
+  compagnon dans la zone de notification) plus Rose et les notifications Android.
 - [Rose](https://github.com/Alban1911/Rose) et [Pengu Loader](https://github.com/PenguLoader/PenguLoader).
 - [Preact](https://preactjs.com) et [htm](https://github.com/developit/htm),
   [zxing-android-embedded](https://github.com/journeyapps/zxing-android-embedded),

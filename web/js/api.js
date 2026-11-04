@@ -5,6 +5,7 @@
 // websocket.
 
 import { useEffect, useRef, useState } from "../vendor/preact-htm.js";
+import { cdragonAsset, getRemoteSecret, isRelayPage, open, remoteKeys, seal, takeRemoteSecretFromUrl } from "./remote.js";
 
 const TOKEN_KEY = "lolmobil.token";
 
@@ -12,7 +13,8 @@ const TOKEN_KEY = "lolmobil.token";
 
 const listeners = new Set();
 export const store = {
-  connection: "connecting", // connecting | open | closed | unpaired
+  connection: "connecting", // connecting | open | closed | unpaired | pc-offline
+  remote: false, // connected through the relay (remote access)
   status: { lcu: false, rose: false, plugin: false, pluginVersion: "" },
   settings: { autoAccept: false },
   pcName: "",
@@ -45,12 +47,15 @@ export function useStore(select) {
   const selectRef = useRef(select);
   selectRef.current = select;
   const value = select(store);
+  // The value this render used: a change made before the effect subscribes
+  // must still trigger a render.
+  const renderedRef = useRef(value);
+  renderedRef.current = value;
   useEffect(() => {
-    let last = selectRef.current(store);
     const fn = () => {
       const next = selectRef.current(store);
-      if (next !== last) {
-        last = next;
+      if (next !== renderedRef.current) {
+        renderedRef.current = next;
         force((n) => n + 1);
       }
     };
@@ -127,8 +132,48 @@ const observed = new Set();
 let retryMs = 800;
 let started = false;
 
+// Wi-Fi (page served by the companion) or remote (page served by a relay,
+// with the secret of the remote access link).
+let mode = null;
+let remote = null; // { room, key }
+
+export async function initConnection() {
+  takeTokenFromUrl();
+  const gotLink = takeRemoteSecretFromUrl();
+  const secret = getRemoteSecret();
+  if ((gotLink || secret) && (await isRelayPage())) {
+    if (!window.crypto || !crypto.subtle) {
+      setStore({ connection: "unpaired" });
+      toast("Ce navigateur ne permet pas le chiffrement : utilise une page en https", "error", 8000);
+      return;
+    }
+    try {
+      remote = await remoteKeys(secret);
+      mode = "remote";
+      setStore({ remote: true });
+    } catch (e) {
+      toast(e.message, "error", 8000);
+      setStore({ connection: "unpaired" });
+      return;
+    }
+  } else if (await isRelayPage()) {
+    mode = "remote";
+    setStore({ remote: true, connection: "unpaired" });
+    return;
+  } else {
+    mode = "lan";
+  }
+  connect();
+}
+
+export const isRemoteMode = () => mode === "remote";
+
 export function connect() {
   started = true;
+  if (mode === "remote") {
+    connectRemote();
+    return;
+  }
   const token = getToken();
   if (!token) {
     setStore({ connection: "unpaired" });
@@ -171,6 +216,60 @@ export function connect() {
   };
 }
 
+// ------------------------------------------------------------ remote mode
+
+let sendQueue = Promise.resolve();
+let recvQueue = Promise.resolve();
+let pingTimer = null;
+
+function connectRemote() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/client/${remote.room}`);
+  socket = ws;
+  ws.onopen = () => {
+    retryMs = 800;
+    clearInterval(pingTimer);
+    pingTimer = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send("ping"), 25000);
+  };
+  ws.onmessage = (event) => {
+    const data = event.data;
+    if (data === "pong") return;
+    if (data.charAt(0) === "{") {
+      // Relay control frame.
+      let frame;
+      try {
+        frame = JSON.parse(data);
+      } catch (e) {
+        return;
+      }
+      if (frame.t === "host") {
+        if (frame.online) {
+          setStore({ connection: "open" });
+          if (observed.size) send({ type: "observe", paths: [...observed] });
+        } else {
+          setStore({ connection: "pc-offline", status: { ...store.status, lcu: false } });
+        }
+      }
+      return;
+    }
+    recvQueue = recvQueue
+      .then(async () => handleMessage(JSON.parse(await open(remote.key, data))))
+      .catch(() => {
+        /* not for us / corrupted */
+      });
+  };
+  ws.onclose = () => {
+    if (socket !== ws) return;
+    socket = null;
+    clearInterval(pingTimer);
+    for (const [, p] of pending) p.reject(new Error("Connexion perdue"));
+    pending.clear();
+    setStore({ connection: "closed", status: { ...store.status, lcu: false } });
+    setTimeout(connect, retryMs);
+    retryMs = Math.min(retryMs * 1.7, 10000);
+  };
+}
+
 async function tokenRejected() {
   try {
     const res = await fetch(`/api/check?token=${encodeURIComponent(getToken())}`);
@@ -181,11 +280,22 @@ async function tokenRejected() {
 }
 
 function send(msg) {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(msg));
+  const ws = socket;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  if (mode === "remote") {
+    if (store.connection !== "open") return false;
+    const text = JSON.stringify(msg);
+    // Keep the order of messages while encrypting.
+    sendQueue = sendQueue
+      .then(async () => {
+        const wire = await seal(remote.key, text);
+        if (ws.readyState === WebSocket.OPEN) ws.send(wire);
+      })
+      .catch(() => {});
     return true;
   }
-  return false;
+  ws.send(JSON.stringify(msg));
+  return true;
 }
 
 function handleMessage(msg) {
@@ -330,6 +440,6 @@ export function selectChroma(chroma) {
 // Asset URL served by the companion (images from the client).
 export function asset(path) {
   if (!path) return "";
-  if (path.startsWith("/lol-game-data/")) return "/lcu" + path;
+  if (path.startsWith("/lol-game-data/assets/")) return mode === "remote" ? cdragonAsset(path) : "/lcu" + path;
   return path;
 }

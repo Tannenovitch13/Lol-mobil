@@ -52,6 +52,7 @@ class WebBridge(private val activity: MainActivity) {
     /** Called by the companion's page when the PIN was typed there. */
     @JavascriptInterface
     fun onPaired(token: String) {
+        if (prefs.isRemote) return
         activity.runOnUiThread {
             val uri = activity.webView.url?.let { Uri.parse(it) } ?: return@runOnUiThread
             val host = uri.host
@@ -107,5 +108,17 @@ class WebBridge(private val activity: MainActivity) {
     fun savedPc(): String = JSONObject()
         .put("baseUrl", prefs.baseUrl ?: "")
         .put("name", prefs.pcName ?: "")
+        .put("remote", prefs.isRemote)
         .toString()
+
+    /** Remote access link typed or pasted by hand. */
+    @JavascriptInterface
+    fun openLink(text: String) {
+        val link = Remote.parseLink(text)
+        if (link == null) {
+            activity.jsCallback("onQrResult", JSONObject().put("error", "Lien d'accès à distance invalide"))
+            return
+        }
+        activity.connectRemote(link)
+    }
 }

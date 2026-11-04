@@ -78,6 +78,15 @@ func (s *Server) PairURL(ip string) string {
 	return fmt.Sprintf("http://%s:%d/#token=%s", ip, s.Cfg.Port, s.Cfg.Token)
 }
 
+// RemoteURL is the remote access link (relay), or "" without a relay. The
+// secret is in the fragment, which browsers never send to the relay.
+func (s *Server) RemoteURL() string {
+	if s.Cfg.RelayURL == "" {
+		return ""
+	}
+	return s.Cfg.RelayURL + "/#k=" + s.Cfg.RemoteSecret
+}
+
 func (s *Server) bestIP() string {
 	if ips := LANAddresses(); len(ips) > 0 {
 		return ips[0]
@@ -106,6 +115,11 @@ li{margin:6px 0;text-align:left}
 <p class="muted">Adresse(s) de ce PC :</p>
 <ul>{{range .URLs}}<li><code>{{.}}</code></li>{{end}}</ul>
 <p class="muted">Le téléphone doit être sur le même Wi-Fi que ce PC. Si rien ne se connecte, autorise « LolMobil Companion » dans le pare-feu Windows (réseaux privés).</p>
+{{if .RemoteQR}}<h2>Accès à distance (4G)</h2>
+<p>Scanne ce QR code une fois pour piloter le client depuis n'importe où (via ton relais {{.Relay}}) :</p>
+<div class="qr"><img src="data:image/png;base64,{{.RemoteQR}}" width="280" height="280" alt="QR code accès à distance"></div>
+<p class="muted">Ce QR code contient la clé de chiffrement : ne le partage pas.</p>
+{{else}}<p class="muted">Accès à distance désactivé : déploie le relais puis relance avec <code>-relay https://…</code> (voir le README).</p>{{end}}
 </main></body></html>`))
 
 // servePairPage shows the QR code and PIN, only on this PC.
@@ -123,13 +137,21 @@ func (s *Server) servePairPage(w http.ResponseWriter, r *http.Request) {
 	for _, ip := range LANAddresses() {
 		urls = append(urls, fmt.Sprintf("http://%s:%d", ip, s.Cfg.Port))
 	}
+	remoteQR := ""
+	if link := s.RemoteURL(); link != "" {
+		if img, err := qrcode.Encode(link, qrcode.Medium, 512); err == nil {
+			remoteQR = base64.StdEncoding.EncodeToString(img)
+		}
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	var buf bytes.Buffer
 	_ = pairPage.Execute(&buf, map[string]any{
-		"QR":   base64.StdEncoding.EncodeToString(png),
-		"PIN":  s.Cfg.PIN,
-		"URLs": urls,
+		"QR":       base64.StdEncoding.EncodeToString(png),
+		"PIN":      s.Cfg.PIN,
+		"URLs":     urls,
+		"RemoteQR": remoteQR,
+		"Relay":    s.Cfg.RelayURL,
 	})
 	_, _ = w.Write(buf.Bytes())
 }

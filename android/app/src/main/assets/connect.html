@@ -60,6 +60,12 @@
         </div>
         <button class="btn" style="width:100%;margin-top:8px" onclick="manual()">Continuer</button>
       </details>
+      <details>
+        <summary>Coller un lien d'accès à distance</summary>
+        <p class="muted small" style="margin-top:8px">Pour jouer hors de chez toi : le lien https://…#k=… affiché par le compagnon quand le relais est configuré.</p>
+        <input id="link" placeholder="https://lolmobil-relay….workers.dev/#k=…" style="margin-top:8px" />
+        <button class="btn" style="width:100%;margin-top:8px" onclick="openLink()">Ouvrir</button>
+      </details>
     </div>
   </div>
 
@@ -143,6 +149,13 @@
     const port = parseInt($("port").value, 10) || 8787;
     if (!host) return showError("Entre l'adresse IP du PC (affichée par le compagnon).");
     choose({ name: host, host, port });
+  }
+
+  function openLink() {
+    const text = $("link").value.trim();
+    if (!text) return showError("Colle le lien d'accès à distance.");
+    showError("");
+    A.openLink(text);
   }
 
   function pair() {
