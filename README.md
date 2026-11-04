@@ -75,9 +75,9 @@ développement, ouvre l'onglet **Actions**, choisis le dernier build réussi, pu
 2. La fenêtre affiche l'adresse du PC, un **code d'appairage** à 6 chiffres et un QR code. Au premier
    lancement, la page `http://127.0.0.1:8787/pair` s'ouvre aussi dans le navigateur.
 3. **Avec Rose** : le compagnon copie le plugin `LolMobil-Remote` dans
-   `C:\Program Files\Rose\_internal\Pengu Loader\plugins`. Comme Rose est installé dans *Program Files*,
-   lance le compagnon **une fois en administrateur** pour que la copie réussisse, puis **redémarre le
-   client LoL**. La pastille « Plugin » passe alors au vert dans l'appli.
+   `C:\Program Files\Rose\_internal\Pengu Loader\plugins`. Comme ce dossier est protégé, Windows
+   affiche une fois une demande d'autorisation (UAC) : accepte-la, puis **redémarre le client LoL**. La
+   pastille « Plugin » passe alors au vert dans l'appli.
    - Pengu Loader installé ailleurs : `LolMobil-Companion.exe -pengu-plugins "D:\...\plugins"` (le chemin
      est retenu), ou copie le dossier `LolMobil-Remote` du zip dans ce dossier `plugins`.
 

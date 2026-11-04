@@ -38,7 +38,7 @@
         <activity
             android:name="com.journeyapps.barcodescanner.CaptureActivity"
             android:screenOrientation="fullSensor"
-            tools:replace="screenOrientation" />
+            tools:replace="android:screenOrientation" />
 
         <service
             android:name=".CompanionService"

@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -56,11 +57,15 @@ func run() error {
 		showVersion   = flag.Bool("version", false, "print the version and exit")
 		roseDisabled  = flag.Bool("no-rose", false, "do not connect to Rose")
 		discoveryPort = flag.Int("discovery-port", 0, "UDP port for automatic discovery (default: port+1)")
+		installOnly   = flag.Bool("install-plugin-only", false, "install the plugin into -pengu-plugins with -port, then exit (used for the administrator prompt)")
 	)
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
 		return nil
+	}
+	if *installOnly {
+		return installPluginOnly(*pluginsDir, *port)
 	}
 
 	cfg, err := config.Load()
@@ -175,6 +180,11 @@ func installPlugin(cfg *config.Config) {
 	for _, dir := range dirs {
 		changed, err := pengu.Install(lolmobil.Plugin(), dir, cfg.Port)
 		switch {
+		case errors.Is(err, pengu.ErrNeedsAdmin):
+			log.Printf("[Plugin] %s est protégé (Program Files) : Windows va demander l'autorisation d'installer le plugin LolMobil-Remote.", dir)
+			if err := runElevated([]string{"-install-plugin-only", "-pengu-plugins", dir, "-port", strconv.Itoa(cfg.Port)}); err != nil {
+				log.Printf("[Plugin] Installation refusée (%v). Lance le compagnon en administrateur, ou copie le dossier LolMobil-Remote dans %s.", err, dir)
+			}
 		case err != nil:
 			log.Printf("[Plugin] %v", err)
 		case changed:
@@ -183,6 +193,27 @@ func installPlugin(cfg *config.Config) {
 			log.Printf("[Plugin] Plugin LolMobil-Remote à jour dans %s", dir)
 		}
 	}
+}
+
+// installPluginOnly runs in the elevated copy started by runElevated.
+func installPluginOnly(dir string, port int) error {
+	if dir == "" {
+		return errors.New("-install-plugin-only needs -pengu-plugins")
+	}
+	if port == 0 {
+		port = config.DefaultPort
+	}
+	changed, err := pengu.Install(lolmobil.Plugin(), dir, port)
+	if err != nil {
+		return err
+	}
+	if changed {
+		fmt.Printf("Plugin LolMobil-Remote installé dans %s.\nRedémarre le client LoL pour le charger.\n", dir)
+	} else {
+		fmt.Printf("Plugin LolMobil-Remote déjà à jour dans %s.\n", dir)
+	}
+	time.Sleep(4 * time.Second)
+	return nil
 }
 
 func printBanner(srv *server.Server, cfg *config.Config) {

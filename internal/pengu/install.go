@@ -78,9 +78,13 @@ func Install(files fs.FS, pluginsDir string, port int) (bool, error) {
 	})
 	if err != nil {
 		if errors.Is(err, fs.ErrPermission) {
-			return false, fmt.Errorf("no permission to write in %s: start the companion once as administrator, or copy the %s folder there yourself", pluginsDir, PluginName)
+			return false, fmt.Errorf("%w: %s", ErrNeedsAdmin, pluginsDir)
 		}
 		return false, err
 	}
 	return changed, nil
 }
+
+// ErrNeedsAdmin means the plugins folder is not writable without
+// administrator rights (Rose installs itself in Program Files).
+var ErrNeedsAdmin = errors.New("administrator rights needed to write the plugin")

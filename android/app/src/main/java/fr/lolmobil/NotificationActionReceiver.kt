@@ -51,6 +51,6 @@ class NotificationActionReceiver : BroadcastReceiver() {
             .setTimeoutAfter(15_000)
             .setContentIntent(CompanionService.openAppIntent(context))
             .build()
-        CompanionService.notify(context, CompanionService.ID_READY, notification)
+        CompanionService.postNotification(context, CompanionService.ID_READY, notification)
     }
 }

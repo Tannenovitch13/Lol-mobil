@@ -92,7 +92,7 @@ class CompanionService : Service() {
         }
 
         @SuppressLint("MissingPermission")
-        fun notify(context: Context, id: Int, notification: Notification) {
+        fun postNotification(context: Context, id: Int, notification: Notification) {
             val nm = NotificationManagerCompat.from(context)
             if (!nm.areNotificationsEnabled()) return
             try {
@@ -311,7 +311,7 @@ class CompanionService : Service() {
     }
 
     private fun updateStatus() {
-        if (!stopped) notify(this, ID_STATUS, statusNotification())
+        if (!stopped) postNotification(this, ID_STATUS, statusNotification())
     }
 
     private fun actionIntent(action: String, requestCode: Int): PendingIntent {
@@ -338,7 +338,7 @@ class CompanionService : Service() {
             .addAction(0, "Accepter", actionIntent(NotificationActionReceiver.ACCEPT, 10))
             .addAction(0, "Refuser", actionIntent(NotificationActionReceiver.DECLINE, 11))
             .build()
-        notify(this, ID_READY, notification)
+        postNotification(this, ID_READY, notification)
     }
 
     private fun showReadyResult(title: String, text: String) {
@@ -352,7 +352,7 @@ class CompanionService : Service() {
             .setTimeoutAfter(15_000)
             .setContentIntent(openAppIntent(this))
             .build()
-        notify(this, ID_READY, notification)
+        postNotification(this, ID_READY, notification)
     }
 
     private fun cancelReady() {
@@ -370,6 +370,6 @@ class CompanionService : Service() {
             .setAutoCancel(true)
             .setContentIntent(openAppIntent(this))
             .build()
-        notify(this, ID_TURN, notification)
+        postNotification(this, ID_TURN, notification)
     }
 }

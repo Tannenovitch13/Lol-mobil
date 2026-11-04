@@ -21,8 +21,8 @@ runes et sorts.
 3. Avec Rose (skins non possédés) :
    Le compagnon installe tout seul le plugin LolMobil-Remote dans les plugins
    Pengu Loader de Rose (C:\Program Files\Rose\_internal\Pengu Loader\plugins).
-   Il faut lancer le compagnon une fois en administrateur si Rose est dans
-   « Program Files », puis redémarrer le client LoL.
+   Rose étant dans « Program Files », Windows demande une fois l'autorisation
+   (UAC) : accepte, puis redémarre le client LoL.
    Installation manuelle : copie le dossier LolMobil-Remote de ce zip dans le
    dossier « plugins » de Pengu Loader.
 
