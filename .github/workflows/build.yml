@@ -74,6 +74,10 @@ jobs:
         env:
           OUT: ${{ runner.temp }}/screenshots
         run: test/e2e/run.sh
+      - name: Remote access through an MQTT broker (zero setup mode)
+        env:
+          OUT: ${{ runner.temp }}/screenshots
+        run: test/e2e/run-mqtt.sh
       - name: Remote access through the relay
         env:
           OUT: ${{ runner.temp }}/screenshots

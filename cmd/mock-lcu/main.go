@@ -32,6 +32,7 @@ var (
 	port     = flag.Int("port", 29999, "port")
 	password = flag.String("password", "test", "basic auth password (user riot)")
 	withRose = flag.Bool("rose", false, "also imitate Rose's bridge on 127.0.0.1:50000")
+	broker   = flag.String("mqtt", "", "also run a local MQTT broker (WebSocket) on this address, e.g. 127.0.0.1:1884")
 	speed    = flag.Duration("step", 1500*time.Millisecond, "delay of automatic steps (queue pop, other players' picks)")
 )
 
@@ -62,6 +63,9 @@ func main() {
 	m.initPages()
 	if *withRose {
 		go runRose()
+	}
+	if *broker != "" {
+		go runBroker(*broker)
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	log.Printf("mock LCU on http://%s (user riot, password %s)", addr, *password)

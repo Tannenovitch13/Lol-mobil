@@ -55,12 +55,31 @@ android {
         abortOnError = false
         checkReleaseBuilds = false
     }
+
+    // The mobile interface (../../web) ships inside the app, served from
+    // https://appassets.androidplatform.net/assets/web/: remote access works
+    // without hosting anything.
+    sourceSets {
+        getByName("main") {
+            assets.srcDir(layout.buildDirectory.dir("generated/webAssets"))
+        }
+    }
+}
+
+val copyWebAssets by tasks.registering(Copy::class) {
+    from(rootProject.file("../web"))
+    into(layout.buildDirectory.dir("generated/webAssets/web"))
+}
+
+tasks.named("preBuild") {
+    dependsOn(copyWebAssets)
 }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.activity:activity-ktx:1.9.3")
+    implementation("androidx.webkit:webkit:1.12.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 }

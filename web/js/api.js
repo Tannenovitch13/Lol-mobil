@@ -5,7 +5,17 @@
 // websocket.
 
 import { useEffect, useRef, useState } from "../vendor/preact-htm.js";
-import { cdragonAsset, getRemoteSecret, isRelayPage, open, remoteKeys, seal, takeRemoteSecretFromUrl } from "./remote.js";
+import {
+  cdragonAsset,
+  getBrokers,
+  getRemoteSecret,
+  open,
+  pageHost,
+  remoteKeys,
+  seal,
+  takeRemoteSecretFromUrl,
+} from "./remote.js";
+import { DEFAULT_BROKERS, MqttClient } from "./mqtt.js";
 
 const TOKEN_KEY = "lolmobil.token";
 
@@ -132,46 +142,55 @@ const observed = new Set();
 let retryMs = 800;
 let started = false;
 
-// Wi-Fi (page served by the companion) or remote (page served by a relay,
-// with the secret of the remote access link).
+// "lan": page served by the companion on the Wi-Fi.
+// "relay": page served by your Cloudflare relay (remote access).
+// "mqtt": page from the Android app or a static copy; remote access
+//         through public MQTT brokers. Both remote modes are end-to-end
+//         encrypted with the secret of the remote access link.
 let mode = null;
 let remote = null; // { room, key }
 
 export async function initConnection() {
   takeTokenFromUrl();
-  const gotLink = takeRemoteSecretFromUrl();
-  const secret = getRemoteSecret();
-  if ((gotLink || secret) && (await isRelayPage())) {
-    if (!window.crypto || !crypto.subtle) {
-      setStore({ connection: "unpaired" });
-      toast("Ce navigateur ne permet pas le chiffrement : utilise une page en https", "error", 8000);
-      return;
-    }
-    try {
-      remote = await remoteKeys(secret);
-      mode = "remote";
-      setStore({ remote: true });
-    } catch (e) {
-      toast(e.message, "error", 8000);
-      setStore({ connection: "unpaired" });
-      return;
-    }
-  } else if (await isRelayPage()) {
-    mode = "remote";
-    setStore({ remote: true, connection: "unpaired" });
-    return;
-  } else {
+  takeRemoteSecretFromUrl();
+  const host = await pageHost();
+  if (host === "companion") {
     mode = "lan";
+    connect();
+    return;
+  }
+  mode = host === "relay" ? "relay" : "mqtt";
+  setStore({ remote: true });
+  const secret = getRemoteSecret();
+  if (!secret) {
+    setStore({ connection: "unpaired" });
+    return;
+  }
+  if (!window.crypto || !crypto.subtle) {
+    setStore({ connection: "unpaired" });
+    toast("Ce navigateur ne permet pas le chiffrement : utilise une page en https", "error", 8000);
+    return;
+  }
+  try {
+    remote = await remoteKeys(secret);
+  } catch (e) {
+    toast(e.message, "error", 8000);
+    setStore({ connection: "unpaired" });
+    return;
   }
   connect();
 }
 
-export const isRemoteMode = () => mode === "remote";
+export const isRemoteMode = () => mode === "relay" || mode === "mqtt";
 
 export function connect() {
   started = true;
-  if (mode === "remote") {
-    connectRemote();
+  if (mode === "relay") {
+    connectRelay();
+    return;
+  }
+  if (mode === "mqtt") {
+    connectMqtt();
     return;
   }
   const token = getToken();
@@ -221,11 +240,95 @@ export function connect() {
 let sendQueue = Promise.resolve();
 let recvQueue = Promise.resolve();
 let pingTimer = null;
+// Writes one encrypted message to the PC (set by the remote transport).
+let sendWire = null;
 
-function connectRemote() {
+function receiveWire(wire) {
+  recvQueue = recvQueue
+    .then(async () => handleMessage(JSON.parse(await open(remote.key, wire))))
+    .catch(() => {
+      /* not for us / corrupted */
+    });
+}
+
+function hostPresence(online) {
+  if (online) {
+    setStore({ connection: "open" });
+    if (observed.size) send({ type: "observe", paths: [...observed] });
+  } else {
+    setStore({ connection: "pc-offline", status: { ...store.status, lcu: false } });
+  }
+}
+
+function lostConnection() {
+  clearInterval(pingTimer);
+  sendWire = null;
+  for (const [, p] of pending) p.reject(new Error("Connexion perdue"));
+  pending.clear();
+  setStore({ connection: "closed", status: { ...store.status, lcu: false } });
+  setTimeout(connect, retryMs);
+  retryMs = Math.min(retryMs * 1.7, 10000);
+}
+
+// ---- through public MQTT brokers
+
+let brokerIndex = 0;
+const randomId = () => [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+async function connectMqtt() {
+  const brokers = getBrokers(DEFAULT_BROKERS);
+  const prefix = `lolmobil/v1/${remote.room}`;
+  const id = randomId();
+  const hostTopic = `${prefix}/host`;
+  for (let attempt = 0; attempt < brokers.length; attempt++) {
+    const url = brokers[(brokerIndex + attempt) % brokers.length];
+    const client = new MqttClient(url, {
+      clientId: "lmc-" + id,
+      keepAlive: 30,
+      will: { topic: hostTopic, payload: JSON.stringify({ t: "close", c: id }), retain: false },
+    });
+    try {
+      await client.connect();
+    } catch (e) {
+      continue;
+    }
+    brokerIndex = (brokerIndex + attempt) % brokers.length;
+    retryMs = 800;
+    socket = client;
+    client.onmessage = (topic, text) => {
+      if (topic === `${prefix}/presence`) {
+        if (text === "1") client.publish(hostTopic, JSON.stringify({ t: "open", c: id }));
+        hostPresence(text === "1");
+      } else {
+        receiveWire(text);
+      }
+    };
+    client.onclose = () => {
+      if (socket !== client) return;
+      socket = null;
+      lostConnection();
+    };
+    sendWire = (wire) => client.publish(hostTopic, JSON.stringify({ t: "msg", c: id, d: wire }));
+    client.subscribe(`${prefix}/c/${id}`);
+    // Retained: tells right away whether the PC is online.
+    client.subscribe(`${prefix}/presence`);
+    setStore({ connection: "pc-offline" });
+    return;
+  }
+  // No broker reachable: try again later, starting with the next one.
+  brokerIndex = (brokerIndex + 1) % brokers.length;
+  setStore({ connection: "closed" });
+  setTimeout(connect, retryMs);
+  retryMs = Math.min(retryMs * 1.7, 15000);
+}
+
+// ---- through your Cloudflare relay
+
+function connectRelay() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/client/${remote.room}`);
   socket = ws;
+  sendWire = (wire) => ws.readyState === WebSocket.OPEN && ws.send(wire);
   ws.onopen = () => {
     retryMs = 800;
     clearInterval(pingTimer);
@@ -242,31 +345,15 @@ function connectRemote() {
       } catch (e) {
         return;
       }
-      if (frame.t === "host") {
-        if (frame.online) {
-          setStore({ connection: "open" });
-          if (observed.size) send({ type: "observe", paths: [...observed] });
-        } else {
-          setStore({ connection: "pc-offline", status: { ...store.status, lcu: false } });
-        }
-      }
+      if (frame.t === "host") hostPresence(frame.online);
       return;
     }
-    recvQueue = recvQueue
-      .then(async () => handleMessage(JSON.parse(await open(remote.key, data))))
-      .catch(() => {
-        /* not for us / corrupted */
-      });
+    receiveWire(data);
   };
   ws.onclose = () => {
     if (socket !== ws) return;
     socket = null;
-    clearInterval(pingTimer);
-    for (const [, p] of pending) p.reject(new Error("Connexion perdue"));
-    pending.clear();
-    setStore({ connection: "closed", status: { ...store.status, lcu: false } });
-    setTimeout(connect, retryMs);
-    retryMs = Math.min(retryMs * 1.7, 10000);
+    lostConnection();
   };
 }
 
@@ -280,20 +367,18 @@ async function tokenRejected() {
 }
 
 function send(msg) {
-  const ws = socket;
-  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-  if (mode === "remote") {
-    if (store.connection !== "open") return false;
+  if (isRemoteMode()) {
+    const write = sendWire;
+    if (!write || store.connection !== "open") return false;
     const text = JSON.stringify(msg);
     // Keep the order of messages while encrypting.
     sendQueue = sendQueue
-      .then(async () => {
-        const wire = await seal(remote.key, text);
-        if (ws.readyState === WebSocket.OPEN) ws.send(wire);
-      })
+      .then(async () => write(await seal(remote.key, text)))
       .catch(() => {});
     return true;
   }
+  const ws = socket;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   ws.send(JSON.stringify(msg));
   return true;
 }
@@ -440,6 +525,6 @@ export function selectChroma(chroma) {
 // Asset URL served by the companion (images from the client).
 export function asset(path) {
   if (!path) return "";
-  if (path.startsWith("/lol-game-data/assets/")) return mode === "remote" ? cdragonAsset(path) : "/lcu" + path;
+  if (path.startsWith("/lol-game-data/assets/")) return isRemoteMode() ? cdragonAsset(path) : "/lcu" + path;
   return path;
 }

@@ -30,10 +30,10 @@ runes et sorts.
    Installation manuelle : copie le dossier LolMobil-Remote de ce zip dans le
    dossier « plugins » de Pengu Loader.
 
-4. Accès à distance (4G), optionnel : déploie le relais gratuit (voir
-   relay/README.md sur GitHub), puis lance une fois
-   LolMobil-Companion.exe -relay https://lolmobil-relay.<ton-nom>.workers.dev
-   et scanne le QR code « Accès à distance » de la page d'appairage.
+4. Hors de chez toi (pas le même Wi-Fi, 4G) : rien à configurer. Scanne une
+   fois le QR code « Accès à distance » de la page d'appairage avec l'appli.
+   Les échanges passent par des serveurs MQTT publics gratuits, chiffrés de
+   bout en bout. Pour couper : LolMobil-Companion.exe -remote off
 
 Options utiles (dans un terminal) :
   LolMobil-Companion.exe -pair              ouvre la page avec le QR code

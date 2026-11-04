@@ -15,6 +15,7 @@ import android.provider.Settings
 import android.view.WindowManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -22,6 +23,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.webkit.WebViewAssetLoader
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import org.json.JSONObject
@@ -39,7 +41,13 @@ class MainActivity : AppCompatActivity() {
         var visible = false
 
         const val CONNECT_PAGE = "file:///android_asset/connect.html"
+
+        /** The interface bundled in the app, served over https (secure context). */
+        const val BUNDLED_HOST = "appassets.androidplatform.net"
+        const val BUNDLED_UI = "https://$BUNDLED_HOST/assets/web/index.html"
     }
+
+    private lateinit var assetLoader: WebViewAssetLoader
 
     lateinit var webView: WebView
         private set
@@ -70,11 +78,17 @@ class MainActivity : AppCompatActivity() {
         settings.mediaPlaybackRequiresUserGesture = false
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
+        assetLoader = WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
         webView.addJavascriptInterface(WebBridge(this), "LolMobilAndroid")
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                assetLoader.shouldInterceptRequest(request.url)
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
-                if (url.scheme == "file") return false
+                if (url.scheme == "file" || url.host == BUNDLED_HOST) return false
                 val base = prefs.baseUrl?.let { Uri.parse(it) }
                 if (base != null && url.host == base.host && url.port == base.port) return false
                 // Anything else (help links...) opens in the browser.
@@ -125,12 +139,20 @@ class MainActivity : AppCompatActivity() {
     fun openCompanion() {
         val base = prefs.baseUrl
         val token = prefs.token
-        if (base == null || (token == null && !prefs.isRemote)) {
-            showConnect(null)
-            return
-        }
         val secret = prefs.remoteSecret
-        webView.loadUrl(if (secret != null) "$base/#k=$secret" else "$base/#token=$token")
+        when {
+            secret != null && base != null -> webView.loadUrl("$base/#k=$secret")
+            secret != null -> {
+                // From anywhere through MQTT: the interface comes with the app.
+                val brokers = prefs.remoteBrokers?.let { "&m=$it" } ?: ""
+                webView.loadUrl("$BUNDLED_UI#k=$secret$brokers")
+            }
+            base != null && token != null -> webView.loadUrl("$base/#token=$token")
+            else -> {
+                showConnect(null)
+                return
+            }
+        }
         if (prefs.notifications) {
             ensureNotificationPermission()
             CompanionService.start(this)
@@ -194,16 +216,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Remote access link: through your relay when the link points to one,
+     * else through the public MQTT brokers (nothing to host).
+     */
     fun connectRemote(link: Remote.Link) {
         thread {
             try {
                 Remote(link.secret)
-                Net.checkRelay(link.baseUrl)
-                prefs.saveRemote(link.baseUrl, link.secret)
-                main.post { openCompanion() }
             } catch (e: Exception) {
-                jsCallback("onQrResult", JSONObject().put("error", e.message ?: "Le relais ne répond pas"))
+                jsCallback("onQrResult", JSONObject().put("error", e.message ?: "Lien invalide"))
+                return@thread
             }
+            val isRelay = try {
+                Net.checkRelay(link.baseUrl)
+                true
+            } catch (e: Exception) {
+                false
+            }
+            prefs.saveRemote(if (isRelay) link.baseUrl else null, link.secret, link.brokers)
+            main.post { openCompanion() }
         }
     }
 

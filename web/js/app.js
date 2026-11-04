@@ -88,7 +88,7 @@ function Settings({ onClose }) {
       </label>
       <div class="info-block">
         <div>PC : <b>${pcName || "?"}</b> · compagnon ${version}</div>
-        <div>Connexion : ${remoteMode ? "à distance (relais, chiffrée)" : "Wi-Fi local"}</div>
+        <div>Connexion : ${remoteMode ? "à distance (chiffrée de bout en bout)" : "Wi-Fi local"}</div>
         ${!remoteMode &&
         html`<div>Accès à distance : ${status.relay ? "prêt ✓" : "non configuré"}</div>`}
         <div>Rose : ${status.rose ? "connecté ✓" : "non détecté"}</div>
@@ -158,8 +158,8 @@ function RemotePairScreen() {
     <h1 class="logo">LolMobil</h1>
     <p>Accès à distance</p>
     <p class="muted">
-      Sur le PC, ouvre la page du compagnon (http://127.0.0.1:8787/pair) et scanne le QR code « Accès à
-      distance » avec ce téléphone, ou ouvre le lien affiché dans la fenêtre du compagnon.
+      Sur le PC, ouvre la page d'appairage du compagnon (clic droit sur son icône → « Connecter un
+      téléphone ») et scanne le QR code « Accès à distance » avec ce téléphone.
     </p>
   </main>`;
 }
@@ -251,12 +251,14 @@ function Router() {
   if (connection === "pc-offline")
     return html`<${Waiting}
       title="Ton PC est hors ligne"
-      text="Le relais est joignable, mais LolMobil Companion n'y est pas connecté. Lance-le sur le PC (avec l'option -relay)."
+      text="LolMobil Companion n'est pas joignable à distance : vérifie qu'il tourne sur le PC et que le PC a accès à Internet."
     />`;
   if (connection !== "open")
     return html`<${Waiting}
       title="Connexion au PC…"
-      text="Vérifie que LolMobil Companion est lancé sur le PC et que le téléphone est sur le même Wi-Fi."
+      text=${isRemoteMode()
+        ? "Connexion au serveur de relais… Vérifie que le téléphone a accès à Internet."
+        : "Vérifie que LolMobil Companion est lancé sur le PC et que le téléphone est sur le même Wi-Fi."}
     />`;
   if (!lcuOk)
     return html`<${Waiting} title="En attente du client League of Legends…" text="Lance le client LoL sur le PC." />`;

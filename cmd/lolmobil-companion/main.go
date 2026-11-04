@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -58,6 +59,9 @@ func run() error {
 		roseDisabled  = flag.Bool("no-rose", false, "do not connect to Rose")
 		discoveryPort = flag.Int("discovery-port", 0, "UDP port for automatic discovery (default: port+1)")
 		relayURL      = flag.String("relay", "", "relay URL for remote access, e.g. https://lolmobil-relay.<you>.workers.dev (saved; \"off\" disables)")
+		remoteFlag    = flag.String("remote", "", "remote access through public MQTT brokers: on (default) or off (saved)")
+		brokersFlag   = flag.String("brokers", "", "comma-separated wss:// MQTT brokers for remote access (saved; \"default\" resets)")
+		webURLFlag    = flag.String("web-url", "", "static copy of the web interface for phones without the app (saved)")
 		installOnly   = flag.Bool("install-plugin-only", false, "install the plugin into -pengu-plugins with -port, then exit (used for the administrator prompt)")
 	)
 	flag.Parse()
@@ -91,6 +95,27 @@ func run() error {
 			c.Token = config.NewToken()
 			c.PIN = config.NewPIN()
 			c.RemoteSecret = config.NewRemoteSecret()
+		}
+		switch *remoteFlag {
+		case "off":
+			c.RemoteDisabled = true
+		case "on":
+			c.RemoteDisabled = false
+		}
+		switch *brokersFlag {
+		case "":
+		case "default":
+			c.Brokers = nil
+		default:
+			c.Brokers = nil
+			for _, b := range strings.Split(*brokersFlag, ",") {
+				if b = strings.TrimSpace(b); b != "" {
+					c.Brokers = append(c.Brokers, b)
+				}
+			}
+		}
+		if *webURLFlag != "" {
+			c.WebURL = *webURLFlag
 		}
 		switch *relayURL {
 		case "":
@@ -169,21 +194,37 @@ func run() error {
 	if !*roseDisabled {
 		go bridge.Run(ctx)
 	}
-	if cfg.RelayURL != "" {
-		keys, err := relay.DeriveKeys(cfg.RemoteSecret)
-		if err != nil {
-			return err
-		}
-		host := &relay.Host{
-			URL:  cfg.RelayURL,
-			Keys: keys,
-			NewSession: func(id string, send func([]byte) error) relay.Session {
-				return srv.NewRelaySession(id, send)
-			},
-			OnStatus: func(bool) { srv.BroadcastStatus() },
-		}
+	remoteDone := make(chan struct{})
+	keys, err := relay.DeriveKeys(cfg.RemoteSecret)
+	if err != nil {
+		return err
+	}
+	newSession := func(id string, send func([]byte) error) relay.Session {
+		return srv.NewRelaySession(id, send)
+	}
+	switch {
+	case cfg.RelayURL != "":
+		// Your own relay (Cloudflare Worker), see relay/README.md.
+		host := &relay.Host{URL: cfg.RelayURL, Keys: keys, NewSession: newSession,
+			OnStatus: func(bool) { srv.BroadcastStatus() }}
 		srv.RelayConnected = host.Connected
-		go host.Run(ctx)
+		srv.RemoteLink = cfg.RelayURL + "/#k=" + cfg.RemoteSecret
+		srv.RemoteVia = "ton relais " + cfg.RelayURL
+		go func() { host.Run(ctx); close(remoteDone) }()
+	case !cfg.RemoteDisabled:
+		// No setup: public MQTT brokers, end-to-end encrypted.
+		brokers := cfg.Brokers
+		if len(brokers) == 0 {
+			brokers = relay.DefaultBrokers
+		}
+		host := &relay.MQTTHost{Brokers: brokers, Keys: keys, NewSession: newSession,
+			OnStatus: func(bool) { srv.BroadcastStatus() }}
+		srv.RelayConnected = host.Connected
+		srv.RemoteLink = remoteLink(cfg)
+		srv.RemoteVia = "des serveurs MQTT publics, chiffré de bout en bout"
+		go func() { host.Run(ctx); close(remoteDone) }()
+	default:
+		close(remoteDone)
 	}
 
 	printBanner(srv, cfg)
@@ -202,10 +243,33 @@ func run() error {
 		logPath: filepath.Join(filepath.Dir(cfg.Path()), "companion.log"),
 	})
 	log.Printf("Arrêt...")
+	stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+	// Let remote access say the PC is offline.
+	select {
+	case <-remoteDone:
+	case <-shutdownCtx.Done():
+	}
 	return nil
+}
+
+// defaultWebURL is the interface on GitHub, for phones without the app.
+const defaultWebURL = "https://raw.githack.com/Tannenovitch13/Lol-mobil/HEAD/web/index.html"
+
+// remoteLink is the remote access link of the MQTT mode. The Android app
+// only uses its fragment (secret and brokers); a browser loads the page.
+func remoteLink(cfg *config.Config) string {
+	base := cfg.WebURL
+	if base == "" {
+		base = defaultWebURL
+	}
+	link := base + "#k=" + cfg.RemoteSecret
+	if len(cfg.Brokers) > 0 {
+		link += "&m=" + url.QueryEscape(strings.Join(cfg.Brokers, ","))
+	}
+	return link
 }
 
 func installPlugin(cfg *config.Config) {
@@ -282,13 +346,13 @@ func printBanner(srv *server.Server, cfg *config.Config) {
 		})
 	}
 	if link := srv.RemoteURL(); link != "" {
-		fmt.Println("  Accès à distance (4G) : ouvre une fois ce lien sur le téléphone,")
-		fmt.Println("  ou scanne le 2e QR code de la page ci-dessus :")
+		fmt.Println("  Accès à distance (4G, autre Wi-Fi) : scanne le 2e QR code de la")
+		fmt.Println("  page ci-dessus avec l'appli LolMobil, ou ouvre ce lien :")
 		fmt.Println("  " + link)
 		fmt.Println("  Garde ce lien secret : il donne le contrôle de ton client LoL.")
 		fmt.Println()
 	} else {
-		fmt.Println("  Accès à distance : désactivé (voir -relay dans le README).")
+		fmt.Println("  Accès à distance : désactivé (-remote on pour le réactiver).")
 		fmt.Println()
 	}
 	fmt.Println("  Laisse le compagnon ouvert pendant que tu joues. Ctrl+C pour quitter.")
@@ -343,5 +407,3 @@ func openBrowser(url string) {
 	}
 	_ = cmd.Start()
 }
-
-

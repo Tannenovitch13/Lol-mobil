@@ -2,11 +2,15 @@ package fr.lolmobil
 
 import android.net.Uri
 import android.util.Base64
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 
 /**
  * End-to-end encryption for remote access through the LolMobil relay. Same
@@ -16,8 +20,11 @@ import javax.crypto.spec.SecretKeySpec
  * base64(nonce || ciphertext || tag).
  */
 class Remote(secret: String) {
-    /** A remote access link: relay base URL and secret. */
-    class Link(val baseUrl: String, val secret: String)
+    /**
+     * A remote access link: base URL (your relay, or just where the page is
+     * hosted), secret, and optional MQTT brokers (m=...).
+     */
+    class Link(val baseUrl: String, val secret: String, val brokers: String?)
 
     val roomId: String
     private val key: SecretKeySpec
@@ -29,12 +36,22 @@ class Remote(secret: String) {
         key = SecretKeySpec(derive("lolmobil-key", raw), "AES")
     }
 
+    /** Plaintext = flag byte (0 raw, 1 gzip) + JSON, like the Go side. */
     fun seal(text: String): String {
+        val json = text.toByteArray(Charsets.UTF_8)
+        val payload = if (json.size > 1024) {
+            val out = ByteArrayOutputStream()
+            out.write(1)
+            GZIPOutputStream(out).use { it.write(json) }
+            out.toByteArray()
+        } else {
+            byteArrayOf(0) + json
+        }
         val nonce = ByteArray(12)
         random.nextBytes(nonce)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, nonce))
-        val sealed = cipher.doFinal(text.toByteArray(Charsets.UTF_8))
+        val sealed = cipher.doFinal(payload)
         return Base64.encodeToString(nonce + sealed, Base64.NO_WRAP)
     }
 
@@ -42,7 +59,14 @@ class Remote(secret: String) {
         val data = Base64.decode(wire, Base64.DEFAULT)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, data, 0, 12))
-        String(cipher.doFinal(data, 12, data.size - 12), Charsets.UTF_8)
+        val payload = cipher.doFinal(data, 12, data.size - 12)
+        when (payload[0].toInt()) {
+            0 -> String(payload, 1, payload.size - 1, Charsets.UTF_8)
+            1 -> GZIPInputStream(ByteArrayInputStream(payload, 1, payload.size - 1)).use {
+                String(it.readBytes(), Charsets.UTF_8)
+            }
+            else -> null
+        }
     } catch (e: Exception) {
         null
     }
@@ -67,8 +91,12 @@ class Remote(secret: String) {
             val host = uri.host ?: return null
             if (uri.scheme != "https" && uri.scheme != "http") return null
             val port = if (uri.port > 0) ":${uri.port}" else ""
-            return Link("${uri.scheme}://$host$port", secret)
+            val brokers = Regex("(?:^|&)m=([^&]+)").find(uri.fragment ?: "")?.groupValues?.get(1)
+            return Link("${uri.scheme}://$host$port", secret, brokers)
         }
+
+        /** MQTT topics of a room (see internal/relay/mqtt.go). */
+        fun topicPrefix(roomId: String) = "lolmobil/v1/$roomId"
 
         /** WebSocket URL of a phone in the room. */
         fun clientUrl(baseUrl: String, roomId: String): String =

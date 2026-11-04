@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -78,7 +79,7 @@ func (h *Host) Run(ctx context.Context) {
 	retry := time.Second
 	logged := false
 	for ctx.Err() == nil {
-		dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+		dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, Proxy: http.ProxyFromEnvironment}
 		conn, resp, err := dialer.DialContext(ctx, target, nil)
 		if err != nil {
 			if !logged {

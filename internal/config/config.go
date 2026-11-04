@@ -37,6 +37,14 @@ type Config struct {
 	RelayURL string `json:"relayUrl,omitempty"`
 	// RemoteSecret encrypts the traffic through the relay end to end.
 	RemoteSecret string `json:"remoteSecret"`
+	// RemoteDisabled turns off remote access through public MQTT brokers
+	// (used when no RelayURL is set).
+	RemoteDisabled bool `json:"remoteDisabled,omitempty"`
+	// Brokers overrides the public MQTT brokers (wss:// URLs).
+	Brokers []string `json:"brokers,omitempty"`
+	// WebURL is where phones without the app load the interface in remote
+	// mode (any static copy of web/). Empty: the copy on GitHub.
+	WebURL string `json:"webUrl,omitempty"`
 
 	path string
 	mu   sync.Mutex

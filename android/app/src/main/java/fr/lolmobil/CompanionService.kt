@@ -138,7 +138,7 @@ class CompanionService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (socket == null) connect()
+        if (socket == null && mqtt == null) connect()
         if (intent?.action == ACTION_READY) {
             sendReadyCheck(intent.getStringExtra(EXTRA_READY_ACTION) ?: "accept")
         }
@@ -150,6 +150,8 @@ class CompanionService : Service() {
         handler.removeCallbacksAndMessages(null)
         socket?.close(1000, null)
         socket = null
+        mqtt?.close()
+        mqtt = null
         val nm = NotificationManagerCompat.from(this)
         nm.cancel(ID_READY)
         nm.cancel(ID_TURN)
@@ -164,10 +166,10 @@ class CompanionService : Service() {
     // ------------------------------------------------------------ socket
 
     private fun connect() {
-        val base = prefs.baseUrl ?: return
         val secret = prefs.remoteSecret
         if (secret != null) {
-            // Remote access: phone side of the relay room, end-to-end encrypted.
+            // Remote access, end-to-end encrypted: through your relay, or
+            // through the public MQTT brokers.
             val r = try {
                 Remote(secret)
             } catch (e: Exception) {
@@ -175,11 +177,17 @@ class CompanionService : Service() {
                 return
             }
             remote = r
-            val request = Request.Builder().url(Remote.clientUrl(base, r.roomId)).build()
+            val relay = prefs.baseUrl
+            if (relay == null) {
+                connectMqtt(r)
+                return
+            }
+            val request = Request.Builder().url(Remote.clientUrl(relay, r.roomId)).build()
             socket = Net.relayClient.newWebSocket(request, Listener())
             return
         }
         remote = null
+        val base = prefs.baseUrl ?: return
         val token = prefs.token ?: return
         val url = base.replaceFirst("http", "ws") + "/ws?token=" + Uri.encode(token)
         val request = Request.Builder().url(url).build()
@@ -192,9 +200,97 @@ class CompanionService : Service() {
 
     /** Sends a message to the companion (encrypted in remote mode). */
     private fun sendMessage(message: JSONObject): Boolean {
-        val ws = socket ?: return false
         val text = message.toString()
+        val m = mqtt
+        if (m != null) {
+            val r = remote ?: return false
+            val frame = JSONObject().put("t", "msg").put("c", mqttId).put("d", r.seal(text))
+            return m.publish(Remote.topicPrefix(r.roomId) + "/host", frame.toString())
+        }
+        val ws = socket ?: return false
         return ws.send(remote?.seal(text) ?: text)
+    }
+
+    // ------------------------------------------------------------ MQTT
+
+    private var mqtt: MqttClient? = null
+    private var mqttReady = false
+    private var mqttId = ""
+    private var brokerIndex = 0
+    private var brokerFailures = 0
+
+    private fun brokers(): List<String> {
+        val custom = prefs.remoteBrokers?.let { Uri.decode(it) }
+            ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+        return if (custom.isNullOrEmpty()) MqttClient.DEFAULT_BROKERS else custom
+    }
+
+    private fun connectMqtt(r: Remote) {
+        val list = brokers()
+        val url = list[brokerIndex % list.size]
+        mqttId = java.util.UUID.randomUUID().toString().replace("-", "").take(12)
+        val prefix = Remote.topicPrefix(r.roomId)
+        val will = MqttClient.Will(
+            "$prefix/host",
+            JSONObject().put("t", "close").put("c", mqttId).toString(),
+            false
+        )
+        val client = MqttClient(url, "lmc-$mqttId", will, mqttListener)
+        mqtt = client
+        client.connect()
+    }
+
+    private val mqttListener = object : MqttClient.Listener {
+        override fun onConnected(client: MqttClient) {
+            if (mqtt !== client) return
+            val r = remote ?: return
+            brokerFailures = 0
+            retryMs = 1000L
+            mqttReady = true
+            val prefix = Remote.topicPrefix(r.roomId)
+            client.subscribe("$prefix/c/$mqttId")
+            // Retained: says right away whether the PC is online.
+            client.subscribe("$prefix/presence")
+            updateStatus()
+        }
+
+        override fun onMessage(client: MqttClient, topic: String, text: String) {
+            if (mqtt !== client) return
+            val r = remote ?: return
+            val prefix = Remote.topicPrefix(r.roomId)
+            if (topic == "$prefix/presence") {
+                connected = text == "1"
+                if (connected) {
+                    client.publish("$prefix/host", JSONObject().put("t", "open").put("c", mqttId).toString())
+                    sendMessage(observeMessage())
+                } else {
+                    lcuConnected = false
+                }
+                updateStatus()
+                return
+            }
+            r.open(text)?.let { handle(it) }
+        }
+
+        override fun onClosed(client: MqttClient, wasConnected: Boolean) {
+            if (mqtt !== client) return
+            mqtt = null
+            mqttReady = false
+            connected = false
+            lcuConnected = false
+            if (stopped) return
+            updateStatus()
+            val delay = if (wasConnected) {
+                retryMs
+            } else {
+                // Unreachable broker: try the next one, then back off.
+                brokerIndex++
+                brokerFailures++
+                if (brokerFailures % brokers().size != 0) 300L else retryMs
+            }
+            if (delay == retryMs) retryMs = (retryMs * 2).coerceAtMost(30_000L)
+            handler.postDelayed({ if (!stopped && mqtt == null && socket == null) connect() }, delay)
+        }
     }
 
     private val relayPing = object : Runnable {
@@ -374,7 +470,7 @@ class CompanionService : Service() {
     private fun statusNotification(): Notification {
         val pc = prefs.pcName?.takeIf { it.isNotEmpty() } ?: "PC"
         val text = when {
-            !connected && remote != null && socket != null -> "PC hors ligne (relais)"
+            !connected && remote != null && (socket != null || mqttReady) -> "PC hors ligne (à distance)"
             !connected -> "Connexion à $pc…"
             !lcuConnected -> "Connecté · client LoL fermé"
             else -> "Connecté · ${phaseLabel()}"

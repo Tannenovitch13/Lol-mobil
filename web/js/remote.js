@@ -6,17 +6,37 @@ const SECRET_KEY = "lolmobil.remote";
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
+const BROKERS_KEY = "lolmobil.brokers";
+
 export function takeRemoteSecretFromUrl() {
   const match = /(?:^|[#&])k=([A-Za-z0-9_-]{43})(?:&|$)/.exec(location.hash);
   if (!match) return false;
+  const brokers = /(?:^|[#&])m=([^&]+)/.exec(location.hash);
+  sessionSecret = match[1];
   try {
     localStorage.setItem(SECRET_KEY, match[1]);
+    if (brokers) localStorage.setItem(BROKERS_KEY, decodeURIComponent(brokers[1]));
+    else localStorage.removeItem(BROKERS_KEY);
   } catch (e) {
     /* private mode: kept for this visit only */
-    sessionSecret = match[1];
   }
+  sessionBrokers = brokers ? decodeURIComponent(brokers[1]) : "";
   history.replaceState(null, "", location.pathname + location.search);
   return true;
+}
+
+let sessionBrokers = "";
+
+// Brokers chosen in the link (m=...), else the public defaults.
+export function getBrokers(defaults) {
+  let list = sessionBrokers;
+  try {
+    list = localStorage.getItem(BROKERS_KEY) || list;
+  } catch (e) {
+    /* ignore */
+  }
+  const custom = (list || "").split(",").map((s) => s.trim()).filter(Boolean);
+  return custom.length ? custom : defaults;
 }
 
 let sessionSecret = "";
@@ -31,23 +51,30 @@ export function getRemoteSecret() {
 
 export function forgetRemoteSecret() {
   sessionSecret = "";
+  sessionBrokers = "";
   try {
     localStorage.removeItem(SECRET_KEY);
+    localStorage.removeItem(BROKERS_KEY);
   } catch (e) {
     /* ignore */
   }
 }
 
-// True when this page is served by a LolMobil relay (not by the companion).
-export async function isRelayPage() {
+// Who serves this page: "companion" (Wi-Fi), "relay" (your Cloudflare
+// relay) or "static" (the Android app, GitHub...: remote access goes
+// through the public MQTT brokers).
+export async function pageHost() {
   try {
     const res = await fetch("/relay-info", { cache: "no-store" });
-    if (!res.ok) return false;
-    const info = await res.json();
-    return info && info.app === "lolmobil-relay";
+    if (res.ok) {
+      const info = await res.json();
+      if (info && info.app === "lolmobil-relay") return "relay";
+      if (info && info.app === "lolmobil-companion") return "companion";
+    }
   } catch (e) {
-    return false;
+    /* not ours */
   }
+  return "static";
 }
 
 function fromBase64Url(text) {
@@ -87,9 +114,25 @@ export async function remoteKeys(secretText) {
   return { room, hostAuth, key };
 }
 
+async function transform(data, stream) {
+  return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(stream)).arrayBuffer());
+}
+
+// Plaintext = flag byte (0 raw, 1 gzip) + JSON, like internal/relay/crypto.go.
 export async function seal(key, text) {
+  const json = enc.encode(text);
+  let payload;
+  if (json.length > 1024 && typeof CompressionStream !== "undefined") {
+    const gz = await transform(json, new CompressionStream("gzip"));
+    payload = new Uint8Array(gz.length + 1);
+    payload[0] = 1;
+    payload.set(gz, 1);
+  } else {
+    payload = new Uint8Array(json.length + 1);
+    payload.set(json, 1);
+  }
   const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, enc.encode(text)));
+  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, payload));
   const out = new Uint8Array(12 + cipher.length);
   out.set(nonce, 0);
   out.set(cipher, 12);
@@ -98,8 +141,11 @@ export async function seal(key, text) {
 
 export async function open(key, wire) {
   const data = fromBase64(wire);
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: data.subarray(0, 12) }, key, data.subarray(12));
-  return dec.decode(plain);
+  const plain = new Uint8Array(
+    await crypto.subtle.decrypt({ name: "AES-GCM", iv: data.subarray(0, 12) }, key, data.subarray(12))
+  );
+  if (plain[0] === 1) return dec.decode(await transform(plain.subarray(1), new DecompressionStream("gzip")));
+  return dec.decode(plain.subarray(1));
 }
 
 // Game images from Community Dragon, which mirrors the client's

@@ -29,10 +29,10 @@ le téléphone, tu peux choisir n'importe quel skin, même non possédé, et Ros
 | **Sorts** | choix des deux sorts d'invocateur (filtrés selon le mode) |
 | **Salon et amis** | inviter des amis en ligne, des joueurs suggérés ou un Riot ID, nommer chef, exclure, donner ou retirer le droit d'inviter |
 | **Après la partie** | Rejouer / retour à l'accueil, reconnexion si tu es déconnecté |
-| **Accès à distance** | depuis la 4G ou n'importe quel réseau, via un relais gratuit que tu déploies sur Cloudflare (l'équivalent de *Rift* dans Mimic). Les échanges sont chiffrés de bout en bout |
+| **Accès à distance** | pas besoin d'être sur le même Wi-Fi que le PC : en 4G ou sur n'importe quel réseau, **sans rien configurer**. Les échanges passent par des serveurs MQTT publics gratuits et sont chiffrés de bout en bout. Tu peux aussi utiliser ton propre relais (Cloudflare) |
 
-Par défaut, tout reste sur ton réseau local : le téléphone parle au PC, et le PC parle au client LoL.
-L'accès à distance est optionnel ; même avec, le relais ne voit que des données chiffrées.
+Sur le même Wi-Fi, le téléphone parle directement au PC. Ailleurs, les messages passent par un serveur
+intermédiaire qui ne voit que des données chiffrées.
 
 ## Comment ça marche
 
@@ -101,15 +101,25 @@ Laisse le compagnon tourner pendant que tu joues (ou coche « Démarrer avec Win
   code. Tu peux ajouter la page à l'écran d'accueil. Les notifications en arrière-plan sont réservées à
   l'appli Android.
 
-Le téléphone doit être sur le **même réseau** que le PC, sauf si tu actives l'accès à distance.
+### 3. Hors de chez toi (pas le même Wi-Fi)
 
-### 3. Accès à distance (optionnel, comme Mimic)
+Il n'y a rien à installer ni à configurer. Sur la page d'appairage du compagnon, scanne **une fois** le
+second QR code, « Accès à distance », avec l'appli LolMobil. Ensuite, l'appli pilote ton PC depuis la 4G
+ou depuis n'importe quel Wi-Fi.
 
-Déploie ton relais gratuit sur Cloudflare (un bouton ou deux commandes), puis lance le compagnon une fois
-avec `-relay https://lolmobil-relay.<ton-nom>.workers.dev`. Scanne ensuite le QR code « Accès à
-distance » de la page du compagnon : tout est expliqué dans [`relay/README.md`](relay/README.md).
-Autre possibilité : un VPN personnel comme [Tailscale](https://tailscale.com), avec l'adresse Tailscale du
-PC.
+- **Comment ça marche :** le PC et le téléphone se connectent tous les deux, en sortie, à des serveurs
+  [MQTT](https://mqtt.org) publics et gratuits (EMQX, HiveMQ, Mosquitto), un protocole de messagerie
+  standard. Il n'y a aucun port à ouvrir sur ta box, et ça marche aussi en 4G derrière le réseau de
+  l'opérateur. Le PC écoute les trois serveurs à la fois : si l'un tombe, le téléphone passe au suivant.
+- **Sécurité :** tout est chiffré de bout en bout (AES-256-GCM) avec la clé contenue dans le QR code. Les
+  serveurs ne voient que des données illisibles. Garde ce QR code pour toi ; `-reset-pairing` en crée un
+  nouveau.
+- **Sans l'appli** (iPhone) : le même QR code ouvre l'interface dans le navigateur, depuis une copie
+  publique hébergée sur GitHub.
+- **Fiabilité :** ces serveurs publics sont gratuits et sans garantie. Pour une solution qui ne dépend que
+  de toi, déploie ton propre relais Cloudflare gratuit (voir [`relay/README.md`](relay/README.md)) et lance
+  le compagnon avec `-relay https://…`.
+- Désactiver l'accès à distance : `-remote off`.
 
 ## Options du compagnon
 
@@ -121,7 +131,10 @@ PC.
 -pengu-plugins DIR    dossier plugins de Pengu Loader où installer LolMobil-Remote
 -no-plugin-install    ne pas installer le plugin
 -no-rose              ne pas se connecter à Rose
--relay URL            relais pour l'accès à distance (retenu ; "off" pour désactiver)
+-remote on|off        accès à distance par les serveurs MQTT publics (activé par défaut)
+-brokers URL,URL      autres serveurs MQTT (wss://…) ; "default" pour revenir aux serveurs publics
+-relay URL            ton relais Cloudflare à la place des serveurs MQTT ("off" pour l'enlever)
+-web-url URL          copie de l'interface pour les téléphones sans l'appli
 ```
 
 La configuration (`config.json`) et le journal (`companion.log`) se trouvent dans `%APPDATA%\LolMobil\`.
@@ -156,7 +169,9 @@ go run ./cmd/lolmobil-companion -lcu-url http://127.0.0.1:29999 -lcu-password te
 # raccourcis : http://127.0.0.1:29999/mock/goto?state=champselect|finalization|aram|readycheck|…
 # faux carrousel de skins pour tester le plugin : http://127.0.0.1:29999/mock/client
 
-test/e2e/run.sh                                 # test de bout en bout (Playwright)
+test/e2e/run.sh                                 # test de bout en bout (Playwright), Wi-Fi
+test/e2e/run-mqtt.sh                            # accès à distance par MQTT (broker local)
+test/e2e/run-remote.sh                          # accès à distance par le relais Cloudflare (wrangler dev)
 GOOS=windows GOARCH=amd64 go build ./cmd/lolmobil-companion   # .exe Windows
 
 cd android && ./gradlew assembleRelease         # APK (SDK Android requis)
@@ -171,7 +186,7 @@ Structure :
 | `internal/rose` | connexion au pont WebSocket de Rose |
 | `internal/pengu` | canal avec le plugin et installation dans Pengu Loader / Rose |
 | `internal/server` | serveur du téléphone : appairage, relais, découverte UDP, images |
-| `internal/relay`, `relay/` | accès à distance : client du relais (Go) et relais Cloudflare Worker |
+| `internal/relay`, `internal/mqtt`, `relay/` | accès à distance : chiffrement, MQTT, client du relais, relais Cloudflare Worker |
 | `web/` | interface mobile (embarquée dans l'exécutable) |
 | `pengu-plugin/LolMobil-Remote` | plugin Pengu Loader qui pilote le carrousel de skins |
 | `android/` | appli Android : connexion, découverte, QR code, notifications |

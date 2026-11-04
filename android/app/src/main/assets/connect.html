@@ -49,6 +49,7 @@
 
   <div id="choose">
     <button class="btn primary" style="width:100%" onclick="scan()">📷 Scanner le QR code du PC</button>
+    <p class="muted small center" style="margin-top:8px">QR code « Wi-Fi » pour le même réseau, ou « Accès à distance » pour piloter le PC de n'importe où.</p>
     <div class="card" style="margin-top:14px">
       <h3>PC trouvés sur le Wi-Fi <button class="icon" onclick="discover()" aria-label="Rechercher">↻</button></h3>
       <div id="list"><div class="spinner"></div></div>
@@ -62,8 +63,8 @@
       </details>
       <details>
         <summary>Coller un lien d'accès à distance</summary>
-        <p class="muted small" style="margin-top:8px">Pour jouer hors de chez toi : le lien https://…#k=… affiché par le compagnon quand le relais est configuré.</p>
-        <input id="link" placeholder="https://lolmobil-relay….workers.dev/#k=…" style="margin-top:8px" />
+        <p class="muted small" style="margin-top:8px">Pour piloter le PC sans être sur le même Wi-Fi : le lien d'accès à distance (…#k=…) affiché par le compagnon. Le plus simple reste de scanner le QR code « Accès à distance ».</p>
+        <input id="link" placeholder="https://…#k=…" style="margin-top:8px" />
         <button class="btn" style="width:100%;margin-top:8px" onclick="openLink()">Ouvrir</button>
       </details>
     </div>

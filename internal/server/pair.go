@@ -78,13 +78,10 @@ func (s *Server) PairURL(ip string) string {
 	return fmt.Sprintf("http://%s:%d/#token=%s", ip, s.Cfg.Port, s.Cfg.Token)
 }
 
-// RemoteURL is the remote access link (relay), or "" without a relay. The
-// secret is in the fragment, which browsers never send to the relay.
+// RemoteURL is the remote access link, or "" when remote access is off. The
+// secret is in the fragment, which browsers never send to any server.
 func (s *Server) RemoteURL() string {
-	if s.Cfg.RelayURL == "" {
-		return ""
-	}
-	return s.Cfg.RelayURL + "/#k=" + s.Cfg.RemoteSecret
+	return s.RemoteLink
 }
 
 func (s *Server) bestIP() string {
@@ -101,6 +98,7 @@ var pairPage = template.Must(template.New("pair").Parse(`<!doctype html>
 body{font-family:system-ui,sans-serif;background:#010a13;color:#f0e6d2;display:flex;justify-content:center;padding:32px;margin:0}
 main{max-width:560px;text-align:center}
 h1{color:#c8aa6e;font-weight:600}
+h2{font-weight:600;margin-top:28px}
 .qr{background:#fff;padding:12px;border-radius:8px;display:inline-block}
 .pin{font-size:44px;letter-spacing:10px;color:#c8aa6e;font-weight:700;margin:8px 0}
 code{background:#1e2328;padding:2px 6px;border-radius:4px}
@@ -108,6 +106,7 @@ li{margin:6px 0;text-align:left}
 .muted{color:#a09b8c;font-size:14px}
 </style></head><body><main>
 <h1>LolMobil</h1>
+<h2>Sur le même Wi-Fi</h2>
 <p>Scanne ce QR code avec l'application LolMobil (ou l'appareil photo du téléphone) :</p>
 <div class="qr"><img src="data:image/png;base64,{{.QR}}" width="280" height="280" alt="QR code"></div>
 <p>ou tape ce code dans l'application :</p>
@@ -115,11 +114,11 @@ li{margin:6px 0;text-align:left}
 <p class="muted">Adresse(s) de ce PC :</p>
 <ul>{{range .URLs}}<li><code>{{.}}</code></li>{{end}}</ul>
 <p class="muted">Le téléphone doit être sur le même Wi-Fi que ce PC. Si rien ne se connecte, autorise « LolMobil Companion » dans le pare-feu Windows (réseaux privés).</p>
-{{if .RemoteQR}}<h2>Accès à distance (4G)</h2>
-<p>Scanne ce QR code une fois pour piloter le client depuis n'importe où (via ton relais {{.Relay}}) :</p>
+{{if .RemoteQR}}<h2>Accès à distance (4G, autre Wi-Fi)</h2>
+<p>Scanne ce QR code <b>une fois</b> avec l'application LolMobil : ensuite, elle pilote ce PC depuis n'importe où, sans être sur le même Wi-Fi (via {{.Via}}).</p>
 <div class="qr"><img src="data:image/png;base64,{{.RemoteQR}}" width="280" height="280" alt="QR code accès à distance"></div>
-<p class="muted">Ce QR code contient la clé de chiffrement : ne le partage pas.</p>
-{{else}}<p class="muted">Accès à distance désactivé : déploie le relais puis relance avec <code>-relay https://…</code> (voir le README).</p>{{end}}
+<p class="muted">Ce QR code contient la clé de chiffrement : ne le partage pas. Pour le changer : <code>-reset-pairing</code>.</p>
+{{else}}<p class="muted">Accès à distance désactivé (<code>-remote on</code> pour le réactiver).</p>{{end}}
 </main></body></html>`))
 
 // servePairPage shows the QR code and PIN, only on this PC.
@@ -151,7 +150,7 @@ func (s *Server) servePairPage(w http.ResponseWriter, r *http.Request) {
 		"PIN":      s.Cfg.PIN,
 		"URLs":     urls,
 		"RemoteQR": remoteQR,
-		"Relay":    s.Cfg.RelayURL,
+		"Via":      s.RemoteVia,
 	})
 	_, _ = w.Write(buf.Bytes())
 }

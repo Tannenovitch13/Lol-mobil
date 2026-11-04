@@ -1,4 +1,8 @@
-# Relais LolMobil (accès à distance)
+# Relais LolMobil (accès à distance, optionnel)
+
+> Tu n'en as **pas besoin** pour utiliser LolMobil hors de chez toi : par défaut, l'accès à distance passe
+> par des serveurs MQTT publics, sans rien configurer (voir le README principal). Ce relais sert si tu
+> préfères ne dépendre que de ton propre serveur.
 
 Le relais permet au téléphone de joindre le PC **depuis n'importe où** (4G, chez un ami…), comme le
 faisait *Rift* pour Mimic. C'est un petit programme pour **Cloudflare Workers**, qui tourne sur l'offre

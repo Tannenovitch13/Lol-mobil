@@ -1,7 +1,6 @@
-// Remote access test: the phone opens the relay page with the remote link
-// and drives the mock client through the (local) relay, end to end
-// encrypted. Needs: mock-lcu, `wrangler dev` (relay) and the companion
-// started with -relay (see run-remote.sh).
+// Remote access test: the phone opens the remote access link and drives the
+// mock client through the relay (Cloudflare relay with run-remote.sh, MQTT
+// broker with run-mqtt.sh), end to end encrypted.
 const { chromium } = require('playwright');
 const OUT = process.env.OUT || '.';
 const LINK = process.env.LINK;
@@ -29,10 +28,11 @@ const LINK = process.env.LINK;
   await phone.click('.tab:has-text("Runes")');
   await phone.waitForSelector('.page-item');
   await phone.click('.icon-btn');
-  await phone.waitForSelector('text=à distance (relais, chiffrée)');
+  await phone.waitForSelector('text=à distance (chiffrée de bout en bout)');
   await phone.screenshot({ path: `${OUT}/remote-settings.png` });
   // Nothing readable went through the relay.
-  const leaked = frames.filter((f) => f !== 'ping' && (f.includes('lol-') || f.includes('{')));
+  // (app messages carry "type" and LCU paths; encrypted ones are base64)
+  const leaked = frames.filter((f) => f.includes('lol-') || f.includes('"type"'));
   console.log('frames sent:', frames.length, 'plaintext frames:', leaked.length);
   console.log('ERRORS:', JSON.stringify(errors));
   await browser.close();

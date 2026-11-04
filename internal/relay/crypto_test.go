@@ -1,6 +1,9 @@
 package relay
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestRoundTrip(t *testing.T) {
 	secret := NewSecret()
@@ -16,6 +19,14 @@ func TestRoundTrip(t *testing.T) {
 	plain, err := b.Open(wire)
 	if err != nil || string(plain) != `{"type":"ping"}` {
 		t.Fatalf("round trip failed: %v %q", err, plain)
+	}
+	big := bytes.Repeat([]byte(`{"championId":103,"name":"Ahri"},`), 500)
+	plainBig, err := b.Open(a.Seal(big))
+	if err != nil || !bytes.Equal(plainBig, big) {
+		t.Fatalf("compressed round trip failed: %v", err)
+	}
+	if len(a.Seal(big)) > len(big)/4 {
+		t.Fatalf("large message not compressed")
 	}
 	other, _ := DeriveKeys(NewSecret())
 	if _, err := other.Open(wire); err == nil {

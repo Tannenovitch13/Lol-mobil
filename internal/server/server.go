@@ -33,9 +33,12 @@ type Server struct {
 	Web     fs.FS
 	Version string
 	Name    string // shown on the phone (PC name)
-	// RelayConnected reports whether remote access through the relay is up
-	// (nil when no relay is configured).
+	// RelayConnected reports whether remote access is up (nil when off).
 	RelayConnected func() bool
+	// RemoteLink is the remote access link (secret in the fragment) and
+	// RemoteVia describes the way it goes, for the pairing page.
+	RemoteLink string
+	RemoteVia  string
 
 	mu      sync.Mutex
 	clients map[*client]struct{}

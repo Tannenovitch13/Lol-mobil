@@ -26,13 +26,21 @@ class Prefs(context: Context) {
     val isRemote: Boolean
         get() = !remoteSecret.isNullOrEmpty()
 
+    /** Remote access through your own relay (baseUrl) rather than MQTT. */
+    val isRelay: Boolean
+        get() = isRemote && !baseUrl.isNullOrEmpty()
+
+    /** MQTT brokers from the remote access link (URL-encoded list), if any. */
+    val remoteBrokers: String?
+        get() = sp.getString("remoteBrokers", null)
+
     /** Background notifications (match found, your turn). */
     var notifications: Boolean
         get() = sp.getBoolean("notifications", true)
         set(value) = sp.edit().putBoolean("notifications", value).apply()
 
     val isPaired: Boolean
-        get() = !baseUrl.isNullOrEmpty() && (!token.isNullOrEmpty() || isRemote)
+        get() = isRemote || (!baseUrl.isNullOrEmpty() && !token.isNullOrEmpty())
 
     /** PC on the Wi-Fi. */
     fun save(baseUrl: String, token: String, pcName: String?) {
@@ -41,19 +49,22 @@ class Prefs(context: Context) {
             .putString("token", token)
             .putString("pcName", pcName)
             .remove("remoteSecret")
+            .remove("remoteBrokers")
             .apply()
     }
 
-    /** PC reached through a relay (remote access link). */
-    fun saveRemote(relayUrl: String, secret: String) {
+    /** PC reached from anywhere: through your relay, or MQTT (relayUrl null). */
+    fun saveRemote(relayUrl: String?, secret: String, brokers: String?) {
         sp.edit()
             .putString("baseUrl", relayUrl)
             .putString("remoteSecret", secret)
+            .putString("remoteBrokers", brokers)
             .remove("token")
             .apply()
     }
 
     fun clear() {
-        sp.edit().remove("baseUrl").remove("token").remove("pcName").remove("remoteSecret").apply()
+        sp.edit().remove("baseUrl").remove("token").remove("pcName").remove("remoteSecret")
+            .remove("remoteBrokers").apply()
     }
 }
