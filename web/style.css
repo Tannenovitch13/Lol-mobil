@@ -942,3 +942,41 @@ input {
 .spell.active img {
   outline: 2px solid var(--gold);
 }
+
+/* ---------- lobby members & invites */
+.member-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 48px;
+}
+.icon-btn.small {
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+}
+.avatar.small {
+  width: 32px;
+  height: 32px;
+}
+.pending-invites {
+  margin-bottom: 10px;
+}
+.friend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.friend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.search.no-margin {
+  margin-bottom: 0;
+}

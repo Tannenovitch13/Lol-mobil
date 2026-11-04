@@ -64,7 +64,7 @@ export function useStore(select) {
 export const useLcu = (uri) => useStore((s) => s.lcu[uri]);
 
 let toastId = 0;
-export function toast(text, kind = "info", ms = 3500) {
+export function toast(text, kind = "info", ms = kind === "ok" ? 2200 : 3500) {
   const id = ++toastId;
   setStore({ toasts: [...store.toasts, { id, text, kind }] });
   setTimeout(() => setStore({ toasts: store.toasts.filter((t) => t.id !== id) }), ms);

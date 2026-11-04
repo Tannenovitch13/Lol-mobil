@@ -24,6 +24,7 @@ var readWritePrefixes = []string{
 var readOnlyPrefixes = []string{
 	"/lol-summoner/v1/current-summoner",
 	"/lol-summoner/v1/summoners",
+	"/lol-summoner/v1/alias/lookup",
 	"/lol-summoner/v2/summoners",
 	"/lol-game-data/",
 	"/lol-game-queues/",

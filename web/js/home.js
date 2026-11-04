@@ -1,6 +1,7 @@
 import { html, useEffect, useMemo, useState } from "../vendor/preact-htm.js";
 import { act, lcu, refresh, useLcu, useStore } from "./api.js";
 import { loadQueues, positionLabel, profileIcon, useData } from "./data.js";
+import { FRIENDS, InviteSheet, LobbyMember, PendingInvites } from "./social.js";
 
 const LOBBY = "/lol-lobby/v2/lobby";
 const SEARCH = "/lol-matchmaking/v1/search";
@@ -208,6 +209,9 @@ function Lobby({ lobby, phase }) {
   const searching = phase === "Matchmaking";
   const queues = useData(loadQueues);
   const queue = queues && queues.find((q) => q.id === config.queueId);
+  const friends = useLcu(FRIENDS);
+  const [inviting, setInviting] = useState(false);
+  const canInvite = local.isLeader || local.allowedInviteOthers;
 
   if (changing) {
     return html`<main class="screen">
@@ -234,22 +238,18 @@ function Lobby({ lobby, phase }) {
       </div>
       <div class="members">
         ${(lobby.members || []).map(
-          (m) => html`<div class="member" key=${m.puuid || m.summonerId}>
-            <img class="avatar" src=${profileIcon(m.summonerIconId)} alt="" />
-            <div class="grow">
-              <b>${m.gameName || m.summonerName || "Joueur"}</b>
-              ${m.isLeader && html` <span class="tag">Chef</span>`}
-              ${config.showPositionSelector &&
-              html`<div class="small muted">
-                ${positionLabel(m.firstPositionPreference)}
-                ${m.secondPositionPreference && m.secondPositionPreference !== "UNSELECTED"
-                  ? ` / ${positionLabel(m.secondPositionPreference)}`
-                  : ""}
-              </div>`}
-            </div>
-          </div>`
+          (m) => html`<${LobbyMember}
+            key=${m.puuid || m.summonerId}
+            member=${m}
+            local=${local}
+            showPositions=${config.showPositionSelector}
+          />`
         )}
       </div>
+      <${PendingInvites} lobby=${lobby} friends=${friends} />
+      ${canInvite &&
+      !searching &&
+      html`<button class="btn secondary wide" onClick=${() => setInviting(true)}>+ Inviter des amis</button>`}
       ${config.showPositionSelector && !searching && html`<${PositionPicker} member=${local} />`}
     </section>
     <div class="actions">
@@ -266,6 +266,7 @@ function Lobby({ lobby, phase }) {
         Quitter le salon
       </button>`}
     </div>
+    ${inviting && html`<${InviteSheet} lobby=${lobby} onClose=${() => setInviting(false)} />`}
   </main>`;
 }
 

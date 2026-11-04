@@ -152,6 +152,7 @@ func (m *mock) makeLobby(queueID int) {
 		"gameConfig":       map[string]any{"queueId": queueID, "showPositionSelector": positions, "gameMode": "CLASSIC"},
 		"localMember":      me,
 		"members":          []any{me, friend},
+		"invitations":      []any{},
 	}
 	m.emit("/lol-lobby/v2/lobby", m.lobby)
 	if m.phase != "Lobby" {
@@ -445,6 +446,7 @@ var (
 	reBenchSwap   = regexp.MustCompile(`^/lol-champ-select/v1/session/bench/swap/(\d+)$`)
 	rePage        = regexp.MustCompile(`^/lol-perks/v1/pages/(\d+)$`)
 	reRecommended = regexp.MustCompile(`^/lol-perks/v1/recommended-pages/champion/(\d+)/`)
+	reMember      = regexp.MustCompile(`^/lol-lobby/v2/lobby/members/(\d+)/(kick|promote|grant-invite|revoke-invite)$`)
 	reTrade       = regexp.MustCompile(`^/lol-champ-select/v1/session/(trades|swaps|position-swaps)/(\d+)/(request|accept|decline)$`)
 )
 
@@ -489,6 +491,55 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"gameName": "Testeur", "tagLine": "EUW", "displayName": "Testeur", "profileIconId": 29, "summonerLevel": 187})
 	case "GET /lol-lobby/v2/received-invitations":
 		writeJSON(w, 200, []any{})
+	case "GET /lol-chat/v1/friends":
+		writeJSON(w, 200, mockFriends())
+	case "GET /lol-suggested-players/v1/suggested-players":
+		writeJSON(w, 200, []any{map[string]any{"summonerId": 30, "gameName": "Récent1", "summonerIconId": 12, "reason": "RECENT_GAMES"}})
+	case "GET /lol-summoner/v1/summoners":
+		name := r.URL.Query().Get("name")
+		for _, f := range mockFriends() {
+			if strings.EqualFold(f["gameName"].(string)+"#"+f["gameTag"].(string), name) {
+				writeJSON(w, 200, map[string]any{"summonerId": f["summonerId"], "gameName": f["gameName"], "tagLine": f["gameTag"]})
+				return
+			}
+		}
+		notFound(w, "summoner not found")
+	case "POST /lol-lobby/v2/lobby/invitations":
+		if m.lobby == nil {
+			notFound(w, "no lobby")
+			return
+		}
+		var invites []map[string]any
+		_ = json.Unmarshal(raw, &invites)
+		for _, inv := range invites {
+			id := int(inv["toSummonerId"].(float64))
+			m.lobby["invitations"] = append(m.lobby["invitations"].([]any), map[string]any{
+				"invitationId": fmt.Sprintf("inv-%d", id), "toSummonerId": id, "state": "Pending",
+			})
+			// The friend accepts after a moment and joins.
+			m.later(*speed, func() {
+				if m.lobby == nil {
+					return
+				}
+				for _, it := range m.lobby["invitations"].([]any) {
+					inv := it.(map[string]any)
+					if inv["toSummonerId"] == id {
+						inv["state"] = "Accepted"
+					}
+				}
+				for _, f := range mockFriends() {
+					if f["summonerId"] == id {
+						m.lobby["members"] = append(m.lobby["members"].([]any), map[string]any{
+							"puuid": f["puuid"], "summonerId": id, "gameName": f["gameName"], "tagLine": f["gameTag"],
+							"summonerIconId": f["icon"], "isLeader": false, "firstPositionPreference": "FILL",
+						})
+					}
+				}
+				m.emit("/lol-lobby/v2/lobby", m.lobby)
+			})
+		}
+		m.emit("/lol-lobby/v2/lobby", m.lobby)
+		writeJSON(w, 200, invites)
 	case "GET /lol-lobby/v2/lobby":
 		if m.lobby == nil {
 			notFound(w, "LOBBY_NOT_FOUND")
@@ -746,11 +797,54 @@ func (m *mock) serveDynamic(w http.ResponseWriter, r *http.Request, body map[str
 		})
 		return
 	}
+	if mt := reMember.FindStringSubmatch(p); mt != nil && m.lobby != nil && r.Method == http.MethodPost {
+		id, _ := strconv.Atoi(mt[1])
+		members := m.lobby["members"].([]any)
+		for i, it := range members {
+			member := it.(map[string]any)
+			if member["summonerId"] != id {
+				continue
+			}
+			switch mt[2] {
+			case "kick":
+				m.lobby["members"] = append(members[:i:i], members[i+1:]...)
+			case "promote":
+				for _, other := range members {
+					other.(map[string]any)["isLeader"] = false
+				}
+				member["isLeader"] = true
+			case "grant-invite":
+				member["allowedInviteOthers"] = true
+			case "revoke-invite":
+				member["allowedInviteOthers"] = false
+			}
+			m.emit("/lol-lobby/v2/lobby", m.lobby)
+			w.WriteHeader(204)
+			return
+		}
+		notFound(w, "member not found")
+		return
+	}
 	if mt := reTrade.FindStringSubmatch(p); mt != nil {
 		w.WriteHeader(204)
 		return
 	}
 	notFound(w, "mock: unknown "+r.Method+" "+p)
+}
+
+func mockFriends() []map[string]any {
+	f := func(id int, name, availability, status string) map[string]any {
+		return map[string]any{
+			"summonerId": id, "puuid": fmt.Sprintf("p%d", id), "gameName": name, "gameTag": "EUW", "name": name,
+			"availability": availability, "icon": id, "lol": map[string]any{"gameStatus": status},
+		}
+	}
+	return []map[string]any{
+		f(20, "Ami Dispo", "chat", "outOfGame"),
+		f(21, "Ami EnPartie", "dnd", "inGame"),
+		f(22, "Ami Absent", "away", "outOfGame"),
+		f(23, "Ami HorsLigne", "offline", ""),
+	}
 }
 
 func perkObjs(ids ...int) []any {
