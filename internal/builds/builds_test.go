@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -239,5 +240,46 @@ func TestWithFinalItems(t *testing.T) {
 	}
 	if len(res.Builds[0].Situational) != 4 {
 		t.Error("the cached result must not change")
+	}
+}
+
+func TestApplyItemSetFile(t *testing.T) {
+	install := t.TempDir()
+	if err := os.Mkdir(filepath.Join(install, "Game"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeLCU{
+		pages: `[]`,
+		sets:  `{"accountId":7,"itemSets":[{"uid":"mine"},{"uid":"lolmobil-103-ranked","title":"ancien"}]}`,
+	}
+	res := &Result{ChampionID: 103, SourceName: "OP.GG", Mode: "ranked", Position: "middle"}
+	b := Build{Starter: []int{1056}, Core: []int{6655}, CoreStats: Stats{WinRate: 0.5}}
+	out := Apply(context.Background(), f, res, b, ApplyOptions{Items: true, InstallDir: install})
+	if len(out.Errors) != 0 {
+		t.Fatalf("apply: %+v", out)
+	}
+	path := filepath.Join(install, "Config", "Champions", "Ahri", "Recommended", "LolMobil_ranked.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("item set file not written: %v", err)
+	}
+	var set map[string]any
+	if err := json.Unmarshal(data, &set); err != nil {
+		t.Fatal(err)
+	}
+	if set["title"] != "OP.GG Ahri Milieu" || set["map"] != "any" || set["type"] != "custom" {
+		t.Errorf("file content: %s", data)
+	}
+	maps := set["associatedMaps"].([]any)
+	if len(maps) != 1 || maps[0].(float64) != 11 {
+		t.Errorf("maps: %v", maps)
+	}
+	// The copy an older version put in the client is removed.
+	var put struct {
+		ItemSets []map[string]any `json:"itemSets"`
+	}
+	_ = json.Unmarshal(f.bodies["PUT /lol-item-sets/v1/item-sets/42/sets"], &put)
+	if len(put.ItemSets) != 1 || put.ItemSets[0]["uid"] != "mine" {
+		t.Errorf("old API set not removed: %+v", put)
 	}
 }

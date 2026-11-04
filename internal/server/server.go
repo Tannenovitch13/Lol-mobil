@@ -542,7 +542,8 @@ func (s *Server) applyBuild(req builds.Request, index int, opt builds.ApplyOptio
 	res = s.finalItems(ctx, res)
 	opt.InstallDir = cl.Credentials().InstallDir
 	out := builds.Apply(ctx, cl, res, res.Builds[index], opt)
-	log.Printf("[Builds] %s %s for champion %d: done=%v errors=%v", res.SourceName, res.Builds[index].Label, req.ChampionID, out.Done, out.Errors)
+	log.Printf("[Builds] %s %s for champion %d: done=%v errors=%v item set=%s (install folder %q)",
+		res.SourceName, res.Builds[index].Label, req.ChampionID, out.Done, out.Errors, out.ItemSet, opt.InstallDir)
 	return out, nil
 }
 

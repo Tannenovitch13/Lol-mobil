@@ -31,6 +31,8 @@ type ApplyOptions struct {
 type ApplyResult struct {
 	Done   []string `json:"done"`
 	Errors []string `json:"errors"`
+	// ItemSet says where the item set went (file path, or "client").
+	ItemSet string `json:"itemSet,omitempty"`
 }
 
 // Apply writes a build into the client.
@@ -45,10 +47,11 @@ func Apply(ctx context.Context, cl LCU, res *Result, b Build, opt ApplyOptions) 
 		}
 	}
 	if opt.Items {
-		if err := applyItems(ctx, cl, res, b, champ, opt.InstallDir); err != nil {
+		if where, err := applyItems(ctx, cl, res, b, champ, opt.InstallDir); err != nil {
 			out.Errors = append(out.Errors, "Objets : "+err.Error())
 		} else {
 			out.Done = append(out.Done, "set d'objets")
+			out.ItemSet = where
 		}
 	}
 	if opt.Spells && len(b.Spells) == 2 {
@@ -360,29 +363,91 @@ func mapsFor(mode string) []int {
 	return []int{11}
 }
 
-func applyItems(ctx context.Context, cl LCU, res *Result, b Build, champ champion, installDir string) error {
+// applyItems writes the item set the in-game shop shows.
+//
+// Like ChampR (an item set importer maintained in 2026), it writes a file in
+// <League>/Config/Champions/<Alias>/Recommended/, which the game reads when
+// it starts. Without a known install folder it goes through the client's
+// item set API instead.
+func applyItems(ctx context.Context, cl LCU, res *Result, b Build, champ champion, installDir string) (string, error) {
 	if len(b.Core) == 0 && len(b.Starter) == 0 {
-		return errors.New("pas d'objets dans ce build")
+		return "", errors.New("pas d'objets dans ce build")
 	}
 	title := itemSetTitle(res, champ, b)
 	uid := fmt.Sprintf("lolmobil-%d-%s", res.ChampionID, res.Mode)
 	set := map[string]any{
-		"uid": uid, "title": title, "type": "custom", "map": "any", "mode": "any",
+		"title": title, "type": "custom", "map": "any", "mode": "any",
 		"sortrank": 0, "startedFrom": "blank", "preferredItemSlots": []any{},
 		"associatedChampions": []int{res.ChampionID}, "associatedMaps": mapsFor(res.Mode),
 		"blocks": blocks(b),
 	}
-	err := putItemSet(ctx, cl, uid, set)
-	if err == nil {
-		return nil
-	}
-	// Fallback: the file the game reads in its install folder.
+	var fileErr error
 	if installDir != "" && champ.Alias != "" {
-		if ferr := writeItemSetFile(installDir, champ.Alias, title, b); ferr == nil {
-			return nil
+		if fileErr = writeItemSetFile(installDir, champ.Alias, res.Mode, set); fileErr == nil {
+			// Older versions used the API: drop that copy so the shop does
+			// not list the build twice.
+			_ = removeItemSet(ctx, cl, uid)
+			return ItemSetFile(installDir, champ.Alias, res.Mode), nil
 		}
 	}
-	return err
+	set["uid"] = uid
+	if err := putItemSet(ctx, cl, uid, set); err != nil {
+		if fileErr != nil {
+			return "", fmt.Errorf("%v (fichier : %v)", err, fileErr)
+		}
+		return "", err
+	}
+	return "client (API des sets d'objets)", nil
+}
+
+// ItemSetFile is where the item set of a champion goes for a mode.
+func ItemSetFile(installDir, alias, mode string) string {
+	return filepath.Join(installDir, "Config", "Champions", alias, "Recommended", "LolMobil_"+mode+".json")
+}
+
+func writeItemSetFile(installDir, alias, mode string, set map[string]any) error {
+	// Only a League install folder (it holds the game) is written to.
+	if _, err := os.Stat(filepath.Join(installDir, "Game")); err != nil {
+		return fmt.Errorf("dossier de League introuvable : %s", installDir)
+	}
+	path := ItemSetFile(installDir, alias, mode)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(set, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func removeItemSet(ctx context.Context, cl LCU, uid string) error {
+	var me struct {
+		SummonerID int64 `json:"summonerId"`
+	}
+	if err := call(ctx, cl, http.MethodGet, "/lol-summoner/v1/current-summoner", nil, &me); err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/lol-item-sets/v1/item-sets/%d/sets", me.SummonerID)
+	var current struct {
+		AccountID int64            `json:"accountId"`
+		ItemSets  []map[string]any `json:"itemSets"`
+	}
+	if err := call(ctx, cl, http.MethodGet, path, nil, &current); err != nil {
+		return err
+	}
+	kept := []map[string]any{}
+	for _, s := range current.ItemSets {
+		if id, _ := s["uid"].(string); id != uid {
+			kept = append(kept, s)
+		}
+	}
+	if len(kept) == len(current.ItemSets) {
+		return nil
+	}
+	return call(ctx, cl, http.MethodPut, path, map[string]any{
+		"accountId": current.AccountID, "itemSets": kept, "timestamp": time.Now().UnixMilli(),
+	}, nil)
 }
 
 func putItemSet(ctx context.Context, cl LCU, uid string, set map[string]any) error {
@@ -415,26 +480,6 @@ func putItemSet(ctx context.Context, cl LCU, uid string, set map[string]any) err
 	return call(ctx, cl, http.MethodPut, path, map[string]any{
 		"accountId": account, "itemSets": sets, "timestamp": time.Now().UnixMilli(),
 	}, nil)
-}
-
-// writeItemSetFile writes the legacy recommended item file the game also
-// reads: <League>/Game/Config/Champions/<Alias>/Recommended/LolMobil.json.
-func writeItemSetFile(installDir, alias, title string, b Build) error {
-	dir := filepath.Join(installDir, "Game", "Config", "Champions", alias, "Recommended")
-	if _, err := os.Stat(filepath.Join(installDir, "Game")); err != nil {
-		dir = filepath.Join(installDir, "Config", "Champions", alias, "Recommended")
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(map[string]any{
-		"title": title, "type": "custom", "map": "any", "mode": "any",
-		"priority": false, "sortrank": 0, "blocks": blocks(b),
-	}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "LolMobil.json"), data, 0o644)
 }
 
 // FinalItems returns the ids of items worth suggesting after the core build:
