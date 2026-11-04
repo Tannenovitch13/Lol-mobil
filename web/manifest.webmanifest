@@ -1,0 +1,10 @@
+{
+  "name": "LolMobil",
+  "short_name": "LolMobil",
+  "description": "Pilote le client League of Legends depuis ton téléphone",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#010a13",
+  "theme_color": "#010a13",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

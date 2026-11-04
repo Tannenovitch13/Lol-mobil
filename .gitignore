@@ -1,0 +1,23 @@
+# Go
+/dist/
+/lolmobil-companion
+/lolmobil-companion.exe
+*.exe
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/*.iml
+android/app/release/
+android/captures/
+
+# Node / tests
+node_modules/
+test-results/
+
+# OS
+.DS_Store
+Thumbs.db
