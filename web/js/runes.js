@@ -249,7 +249,8 @@ export function RunesTab({ myCell }) {
 
   const usable = useMemo(() => (pages || []).filter((p) => p.isValid !== false && !p.isTemporary), [pages]);
 
-  if (pages === undefined || !perks || !styles) return html`<div class="spinner"></div>`;
+  if (pages === undefined || perks === undefined || styles === undefined) return html`<div class="spinner"></div>`;
+  if (!perks || !styles) return html`<p class="error">Impossible de charger les runes, nouvel essai…</p>`;
 
   const apply = async (draft, okText) => {
     const ok = await act(savePage(draft, current, pages), okText);

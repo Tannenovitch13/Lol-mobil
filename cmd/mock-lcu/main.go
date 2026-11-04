@@ -32,6 +32,7 @@ var (
 	port     = flag.Int("port", 29999, "port")
 	password = flag.String("password", "test", "basic auth password (user riot)")
 	withRose = flag.Bool("rose", false, "also imitate Rose's bridge on 127.0.0.1:50000")
+	flaky    = flag.Int("fail-champions", 0, "fail the first N champion list requests (tests the phone's retry)")
 	broker   = flag.String("mqtt", "", "also run a local MQTT broker (WebSocket) on this address, e.g. 127.0.0.1:1884")
 	speed    = flag.Duration("step", 1500*time.Millisecond, "delay of automatic steps (queue pop, other players' picks)")
 )
@@ -674,6 +675,11 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(204)
 	case "GET /lol-game-data/assets/v1/champion-summary.json":
+		if *flaky > 0 {
+			*flaky--
+			writeJSON(w, 500, map[string]any{"message": "mock: temporary failure"})
+			return
+		}
 		writeJSON(w, 200, championSummary())
 	case "GET /lol-game-data/assets/v1/summoner-spells.json":
 		writeJSON(w, 200, spells())

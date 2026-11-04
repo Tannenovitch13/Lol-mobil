@@ -82,7 +82,7 @@ export function ModePicker({ onPicked, currentQueueId }) {
   }, [queues]);
 
   if (queues === undefined) return html`<div class="spinner"></div>`;
-  if (!queues) return html`<p class="error">Impossible de lire la liste des modes de jeu.</p>`;
+  if (!queues) return html`<p class="error">Impossible de lire la liste des modes de jeu, nouvel essai…</p>`;
 
   const create = async (q) => {
     const ok = await act(lcu("POST", LOBBY, { queueId: q.id }));

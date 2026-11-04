@@ -59,20 +59,33 @@ export const loadQueues = () =>
     return list;
   });
 
-// React-ish hook: value of a loader once ready (undefined before).
+// Value of a loader: undefined while loading, null after a failure (the
+// hook keeps retrying, so a passing glitch does not leave a dead screen).
 export function useData(loader) {
   const lcuOk = useStore((s) => s.status.lcu);
+  const online = useStore((s) => s.connection === "open");
   const [value, setValue] = useState(undefined);
   useEffect(() => {
-    if (!lcuOk) return undefined;
+    if (!lcuOk || !online) return undefined;
     let alive = true;
-    loader()
-      .then((v) => alive && setValue(v))
-      .catch(() => alive && setValue(null));
+    let timer = null;
+    let failures = 0;
+    const run = () => {
+      loader()
+        .then((v) => alive && setValue(v))
+        .catch(() => {
+          if (!alive) return;
+          failures++;
+          if (failures >= 2) setValue(null);
+          timer = setTimeout(run, Math.min(2000 * failures, 10000));
+        });
+    };
+    run();
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
-  }, [lcuOk]);
+  }, [lcuOk, online]);
   return value;
 }
 

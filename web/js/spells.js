@@ -6,7 +6,8 @@ export function SpellsTab({ myCell }) {
   const spells = useData(loadSpells);
   const session = useLcu("/lol-gameflow/v1/session");
   const [slot, setSlot] = useState(1);
-  if (!spells) return html`<div class="spinner"></div>`;
+  if (spells === undefined) return html`<div class="spinner"></div>`;
+  if (!spells) return html`<p class="error">Impossible de charger les sorts, nouvel essai…</p>`;
 
   const queue = session && session.gameData && session.gameData.queue;
   const gameMode = (queue && queue.gameMode) || (session && session.map && session.map.gameMode) || "CLASSIC";

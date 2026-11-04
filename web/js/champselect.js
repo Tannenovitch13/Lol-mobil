@@ -43,7 +43,9 @@ export function ChampionGrid({ ids, selectedId, onPick, emptyText }) {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [champions, ids, query]);
 
-  if (!champions) return html`<div class="spinner"></div>`;
+  if (champions === undefined) return html`<div class="spinner"></div>`;
+  if (champions === null)
+    return html`<p class="error center">Impossible de charger la liste des champions, nouvel essai…</p>`;
   return html`<div class="champion-grid-wrap">
     <input
       class="search"
@@ -207,15 +209,17 @@ function Bench({ session }) {
   </section>`;
 }
 
-async function lockAction(action) {
+async function lockAction(action, championId) {
+  const path = `/lol-champ-select/v1/session/actions/${action.id}`;
+  // The tap may still be on its way: make sure the client has the champion.
+  if (championId > 0 && action.championId !== championId) {
+    await lcu("PATCH", path, { championId });
+  }
   try {
-    await lcu("POST", `/lol-champ-select/v1/session/actions/${action.id}/complete`);
+    await lcu("POST", `${path}/complete`);
   } catch (e) {
     // Older clients complete the action with a PATCH.
-    await lcu("PATCH", `/lol-champ-select/v1/session/actions/${action.id}`, {
-      championId: action.championId,
-      completed: true,
-    });
+    await lcu("PATCH", path, { championId: championId || action.championId, completed: true });
   }
 }
 
@@ -223,14 +227,21 @@ function ActionPanel({ session, active, futurePick, planning }) {
   const pickable = useLcu(PICKABLE);
   const bannable = useLcu(BANNABLE);
   const [showFuture, setShowFuture] = useState(false);
+  // The champion tapped, shown at once (the client confirms a bit later).
+  const [tapped, setTapped] = useState(null);
 
   useEffect(() => {
     refresh(PICKABLE);
     refresh(BANNABLE);
   }, [active && active.id, active && active.type]);
 
-  const hover = (action, championId) =>
+  const chosen = (action) =>
+    action && tapped && tapped.actionId === action.id ? tapped.championId : action && action.championId;
+
+  const hover = (action, championId) => {
+    setTapped({ actionId: action.id, championId });
     act(lcu("PATCH", `/lol-champ-select/v1/session/actions/${action.id}`, { championId }));
+  };
 
   if (active) {
     const isBan = active.type === "ban";
@@ -238,14 +249,14 @@ function ActionPanel({ session, active, futurePick, planning }) {
       <h3>${isBan ? "À toi de bannir !" : "À toi de choisir !"}</h3>
       <${ChampionGrid}
         ids=${isBan ? bannable : pickable}
-        selectedId=${active.championId}
+        selectedId=${chosen(active)}
         onPick=${(id) => hover(active, id)}
       />
       <div class="sticky-actions">
         <button
           class="btn big wide ${isBan ? "danger" : ""}"
-          disabled=${!(active.championId > 0)}
-          onClick=${() => act(lockAction(active))}
+          disabled=${!(chosen(active) > 0)}
+          onClick=${() => act(lockAction(active, chosen(active)))}
         >
           ${isBan ? "Bannir" : "Verrouiller"}
         </button>
@@ -263,7 +274,7 @@ function ActionPanel({ session, active, futurePick, planning }) {
         </div>
         <${ChampionGrid}
           ids=${pickable}
-          selectedId=${futurePick.championId}
+          selectedId=${chosen(futurePick)}
           onPick=${(id) => hover(futurePick, id)}
         />
       </section>`;

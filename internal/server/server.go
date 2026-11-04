@@ -58,6 +58,7 @@ type Server struct {
 	autoBuildDone string
 	itemsMu       sync.Mutex
 	finalItemIDs  map[int]bool // completed items (client data, per session)
+	staticData    staticCache  // trimmed game data, per client session
 }
 
 // client is one connected phone, on the Wi-Fi (websocket) or through the
@@ -574,12 +575,32 @@ func (c *client) handleRequest(msg inbound) {
 	if len(msg.Body) > 0 && string(msg.Body) != "null" {
 		body = msg.Body
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
+	start := time.Now()
+	if method == http.MethodGet {
+		if data, ok, err := c.s.static(ctx, cl, msg.Path); ok {
+			if err != nil {
+				log.Printf("[Phone] GET %s failed after %s: %v", msg.Path, time.Since(start).Round(time.Millisecond), err)
+				c.respond(msg.ID, 502, nil, err.Error())
+				return
+			}
+			c.respond(msg.ID, 200, data, "")
+			return
+		}
+	}
 	resp, err := cl.Do(ctx, method, msg.Path, body)
+	took := time.Since(start).Round(time.Millisecond)
 	if err != nil {
+		log.Printf("[Phone] %s %s failed after %s: %v", method, msg.Path, took, err)
 		c.respond(msg.ID, 502, nil, err.Error())
 		return
+	}
+	// Failed or slow requests explain most "it does not work" reports.
+	if resp.Status >= 400 && !(method == http.MethodGet && resp.Status == http.StatusNotFound) {
+		log.Printf("[Phone] %s %s -> HTTP %d (%s)", method, msg.Path, resp.Status, took)
+	} else if took > 3*time.Second {
+		log.Printf("[Phone] %s %s slow: %s", method, msg.Path, took)
 	}
 	c.respond(msg.ID, resp.Status, resp.Body, "")
 }
