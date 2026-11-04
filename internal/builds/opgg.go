@@ -218,13 +218,15 @@ func (o *OPGG) Fetch(ctx context.Context, req Request) (*Result, error) {
 		}
 		perks := append(append(append([]int{}, r.PrimaryID...), r.SubIDs...), r.ShardIDs...)
 		b := Build{
-			Runes:      Runes{Primary: r.Primary, Sub: r.Secondary, Perks: perks},
-			RuneStats:  Stats{PickRate: rate(r.PickRate), Games: r.Play},
-			Spells:     first(d.SummonerSpells),
-			Starter:    first(d.StarterItems),
-			Boots:      first(d.Boots),
-			SkillOrder: skillOrder,
-			SkillStart: skillStart,
+			Runes:        Runes{Primary: r.Primary, Sub: r.Secondary, Perks: perks},
+			RuneStats:    Stats{PickRate: rate(r.PickRate), Games: r.Play},
+			Spells:       first(d.SummonerSpells),
+			Starter:      first(d.StarterItems),
+			Boots:        first(d.Boots),
+			StarterStats: firstStats(d.StarterItems),
+			BootsStats:   firstStats(d.Boots),
+			SkillOrder:   skillOrder,
+			SkillStart:   skillStart,
 		}
 		if r.Play > 0 {
 			b.RuneStats.WinRate = float64(r.Win) / float64(r.Play)
@@ -256,6 +258,13 @@ func (o *OPGG) Fetch(ctx context.Context, req Request) (*Result, error) {
 		return nil, fmt.Errorf("pas de build OP.GG pour ce champion dans ce rôle")
 	}
 	return res, nil
+}
+
+func firstStats(sets []opggSet) Stats {
+	if len(sets) == 0 {
+		return Stats{}
+	}
+	return setStats(sets[0])
 }
 
 func skillKey(v any) string {

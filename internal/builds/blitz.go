@@ -202,6 +202,10 @@ func num(v any) float64 {
 func ints(v any) []int {
 	var out []int
 	switch x := v.(type) {
+	case float64:
+		if n := int(x); n > 0 {
+			out = append(out, n)
+		}
 	case []any:
 		for _, e := range x {
 			if n := int(num(e)); n > 0 {
@@ -318,6 +322,7 @@ func blitzResult(rows []map[string]any, req Request) (*Result, error) {
 		}
 		if s := blitzChoices(field(row, "startingItems", "starting_items"), "itemIds", "item_ids", "ids"); len(s) > 0 {
 			b.Starter = s[0].ids
+			b.StarterStats = s[0].stats
 		}
 		if s := blitzChoices(field(row, "coreItems", "core_items"), "itemIds", "item_ids", "ids"); len(s) > 0 {
 			b.Core = s[0].ids
@@ -333,6 +338,12 @@ func blitzResult(rows []map[string]any, req Request) (*Result, error) {
 			}
 		}
 		situational = uniqueInts(situational)
+		for _, s := range blitzChoices(field(row, "situationalItems", "situational_items"), "itemId", "item_id") {
+			if bootIDs[s.ids[0]] && len(b.Boots) == 0 {
+				b.Boots = s.ids[:1]
+				b.BootsStats = s.stats
+			}
+		}
 		for _, id := range situational {
 			if bootIDs[id] && len(b.Boots) == 0 {
 				b.Boots = []int{id}

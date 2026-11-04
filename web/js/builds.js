@@ -56,6 +56,12 @@ function ItemIcons({ ids, items, size = 30 }) {
   </span>`;
 }
 
+// "54,1 % V" like the build sites, with the number of games on hover.
+function WinRate({ stats }) {
+  if (!stats || !stats.winRate) return null;
+  return html`<span class="build-wr" title=${games(stats.games)}>${pct(stats.winRate)} V</span>`;
+}
+
 function SpellIcons({ ids, spells }) {
   if (!ids || !ids.length || !spells) return null;
   const byId = new Map(spells.map((s) => [s.id, s]));
@@ -126,12 +132,20 @@ function BuildCard({ build, index, items, spells, perks, styles, onApply, busy }
       html`<span class="skill-order">${build.skillOrder.join(" > ")}</span>`}
     </div>
     ${build.starter && build.starter.length > 0 &&
-    html`<div class="build-line"><span class="small muted">Départ</span><${ItemIcons} ids=${build.starter} items=${items} /></div>`}
+    html`<div class="build-line">
+      <span class="small muted">Départ</span><${ItemIcons} ids=${build.starter} items=${items} />
+      <${WinRate} stats=${build.starterStats} />
+    </div>`}
     <div class="build-line">
       <span class="small muted">Principaux</span>
       <${ItemIcons} ids=${build.core} items=${items} />
-      ${build.boots && build.boots.length > 0 && html`<span class="muted">+</span><${ItemIcons} ids=${build.boots} items=${items} />`}
+      <${WinRate} stats=${build.coreStats} />
     </div>
+    ${build.boots && build.boots.length > 0 &&
+    html`<div class="build-line">
+      <span class="small muted">Bottes</span><${ItemIcons} ids=${build.boots} items=${items} />
+      <${WinRate} stats=${build.bootsStats} />
+    </div>`}
     ${build.situational && build.situational.length > 0 &&
     html`<div class="build-line"><span class="small muted">Ensuite</span><${ItemIcons} ids=${build.situational} items=${items} size=${24} /></div>`}
     <button class="btn wide" disabled=${busy} onClick=${() => onApply(index)}>

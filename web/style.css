@@ -1037,3 +1037,9 @@ input {
   border-top: 1px solid var(--line-soft);
   padding-top: 10px;
 }
+.build-wr {
+  margin-left: auto;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--green);
+}

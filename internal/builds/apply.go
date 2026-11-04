@@ -318,16 +318,21 @@ func block(title string, ids []int) *itemBlock {
 	return b
 }
 
-func blocks(b Build) []itemBlock {
-	starter := "Objets de départ"
-	if len(b.SkillOrder) >= 3 {
-		starter += " · compétences " + strings.Join(b.SkillOrder, " > ")
+// withWinRate adds the win rate to a block title, like OP.GG's item sets:
+// "Objets principaux — 54,1 % de victoires".
+func withWinRate(title string, st Stats) string {
+	if st.WinRate <= 0 {
+		return title
 	}
+	return title + " — " + strings.Replace(fmt.Sprintf("%.1f", st.WinRate*100), ".", ",", 1) + " % de victoires"
+}
+
+func blocks(b Build) []itemBlock {
 	var out []itemBlock
 	for _, blk := range []*itemBlock{
-		block(starter, b.Starter),
-		block("Objets principaux", b.Core),
-		block("Bottes", b.Boots),
+		block(withWinRate("Objets de départ", b.StarterStats), b.Starter),
+		block(withWinRate("Objets principaux", b.CoreStats), b.Core),
+		block(withWinRate("Bottes", b.BootsStats), b.Boots),
 		block("Selon la partie", b.Situational),
 		block("Consommables", []int{2003, 2055}),
 	} {
@@ -336,6 +341,15 @@ func blocks(b Build) []itemBlock {
 		}
 	}
 	return out
+}
+
+// itemSetTitle: "OP.GG Ahri Milieu · Q > W > E" (the skill order to max).
+func itemSetTitle(res *Result, champ champion, b Build) string {
+	title := label(res, champ)
+	if len(b.SkillOrder) >= 3 {
+		title += " · " + strings.Join(b.SkillOrder, " > ")
+	}
+	return title
 }
 
 func mapsFor(mode string) []int {
@@ -350,7 +364,7 @@ func applyItems(ctx context.Context, cl LCU, res *Result, b Build, champ champio
 	if len(b.Core) == 0 && len(b.Starter) == 0 {
 		return errors.New("pas d'objets dans ce build")
 	}
-	title := label(res, champ)
+	title := itemSetTitle(res, champ, b)
 	uid := fmt.Sprintf("lolmobil-%d-%s", res.ChampionID, res.Mode)
 	set := map[string]any{
 		"uid": uid, "title": title, "type": "custom", "map": "any", "mode": "any",

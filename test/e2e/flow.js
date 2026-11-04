@@ -137,7 +137,9 @@ const shot = (p, n) => p.screenshot({ path: `${OUT}/${n}.png` });
   await phone.waitForSelector('.toast:has-text("Appliqué : runes, set d\'objets, sorts")', { timeout: 15000 });
   const sets = await (await fetch('http://127.0.0.1:29999/mock/itemsets')).json();
   const ours = (sets.itemSets || []).find((s) => s.uid === 'lolmobil-103-ranked');
-  if (!ours || ours.title !== 'OP.GG Ahri Milieu' || ours.blocks[1].items[0].id !== '6655') throw new Error('item set not written: ' + JSON.stringify(sets));
+  if (!ours || ours.title !== 'OP.GG Ahri Milieu · Q > W > E' || ours.blocks[1].items[0].id !== '6655' ||
+      ours.blocks[1].type !== 'Objets principaux — 55,0 % de victoires') throw new Error('item set not written: ' + JSON.stringify(sets));
+  console.log('item set blocks:', ours.blocks.map((b) => b.type).join(' | '));
   await phone.click('.tab:has-text("Runes")');
   await phone.waitForSelector('.current-page:has-text("OP.GG Ahri Milieu")', { timeout: 5000 });
   await phone.click('.tab:has-text("Builds")');

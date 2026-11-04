@@ -246,9 +246,10 @@ func (m *mock) startChampSelect(aram bool) {
 }
 
 func randomChamp(taken map[int]bool) int {
-	for {
+	for tries := 0; ; tries++ {
 		c := champions[rand.Intn(len(champions))].ID
-		if !taken[c] && c != 103 {
+		// Few champions in the mock: allow repeats once they run out.
+		if c != 103 && (!taken[c] || tries > 200) {
 			taken[c] = true
 			return c
 		}
@@ -421,6 +422,9 @@ func (m *mock) goTo(state string) {
 		m.startChampSelect(false)
 		taken := m.takenChamps()
 		for _, a := range m.allActions() {
+			if a["completed"] == true {
+				continue
+			}
 			id := 103
 			if a["actorCellId"] != 2 {
 				id = randomChamp(taken)

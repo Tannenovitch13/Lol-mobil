@@ -131,7 +131,9 @@ que tu veux appliquer (runes, set d'objets, sorts), puis touche « Appliquer ce 
 - réutilise toujours la même page de runes (nommée « OP.GG Ahri Milieu », par exemple) au lieu de
   remplir tes pages ;
 - crée ou remplace un **set d'objets** pour ce champion, visible dans la boutique en jeu (onglet des sets
-  d'objets) et dans la Collection du client ;
+  d'objets) et dans la Collection du client. Comme sur OP.GG, chaque catégorie affiche son taux de
+  victoires (« Objets principaux — 56,0 % de victoires ») et le titre rappelle l'ordre des compétences
+  (« OP.GG Ahri Milieu · Q > W > E ») ;
 - règle les deux sorts, en gardant Saut éclair sur la touche que tu utilises déjà.
 
 L'option **Appliquer automatiquement** fait tout cela dès que ton champion est verrouillé.

@@ -53,17 +53,19 @@ type Stats struct {
 
 // Build is one popular way to play the champion.
 type Build struct {
-	Label       string   `json:"label"`
-	Runes       Runes    `json:"runes"`
-	RuneStats   Stats    `json:"runeStats"`
-	Spells      []int    `json:"spells"`
-	Starter     []int    `json:"starter"`
-	Core        []int    `json:"core"`
-	CoreStats   Stats    `json:"coreStats"`
-	Boots       []int    `json:"boots"`
-	Situational []int    `json:"situational"`
-	SkillOrder  []string `json:"skillOrder"` // e.g. ["Q","E","W"] (max order)
-	SkillStart  []string `json:"skillStart"` // first levels, e.g. ["Q","E","W","Q"]
+	Label        string   `json:"label"`
+	Runes        Runes    `json:"runes"`
+	RuneStats    Stats    `json:"runeStats"`
+	Spells       []int    `json:"spells"`
+	Starter      []int    `json:"starter"`
+	StarterStats Stats    `json:"starterStats"`
+	Core         []int    `json:"core"`
+	CoreStats    Stats    `json:"coreStats"`
+	Boots        []int    `json:"boots"`
+	BootsStats   Stats    `json:"bootsStats"`
+	Situational  []int    `json:"situational"`
+	SkillOrder   []string `json:"skillOrder"` // e.g. ["Q","E","W"] (max order)
+	SkillStart   []string `json:"skillStart"` // first levels, e.g. ["Q","E","W","Q"]
 }
 
 // Result of a fetch.

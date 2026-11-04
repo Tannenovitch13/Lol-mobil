@@ -45,6 +45,9 @@ func TestOPGGParse(t *testing.T) {
 	if len(b.Spells) != 2 || b.Core[0] != 6655 || b.Boots[0] != 3020 || b.Starter[0] != 1056 {
 		t.Errorf("items/spells: %+v", b)
 	}
+	if b.CoreStats.WinRate < 0.54 || b.CoreStats.WinRate > 0.56 || b.StarterStats.WinRate < 0.51 || b.BootsStats.WinRate < 0.51 {
+		t.Errorf("item stats: core %+v starter %+v boots %+v", b.CoreStats, b.StarterStats, b.BootsStats)
+	}
 	for _, id := range b.Situational {
 		if id == 3089 {
 			t.Errorf("core item repeated in situational: %v", b.Situational)
@@ -125,6 +128,9 @@ func TestBlitzParse(t *testing.T) {
 	if len(b.Situational) != 1 || b.Situational[0] != 3157 {
 		t.Errorf("situational: %v", b.Situational)
 	}
+	if b.BootsStats.WinRate != 0.5 || b.StarterStats.Games != 800 {
+		t.Errorf("blitz item stats: boots %+v starter %+v", b.BootsStats, b.StarterStats)
+	}
 	if strings.Join(b.SkillOrder, "") != "QWE" {
 		t.Errorf("skill order %v", b.SkillOrder)
 	}
@@ -174,11 +180,13 @@ func TestApply(t *testing.T) {
 	res := &Result{ChampionID: 103, SourceName: "OP.GG", Mode: "ranked", Position: "middle"}
 	// Perks without styles and out of order: styles are derived.
 	b := Build{
-		Runes:   Runes{Perks: []int{5008, 8226, 8112, 8126, 8140, 8135, 8210, 5008, 5001}},
-		Spells:  []int{14, 4},
-		Starter: []int{1056, 2003, 2003},
-		Core:    []int{6655, 4645},
-		Boots:   []int{3020},
+		Runes:      Runes{Perks: []int{5008, 8226, 8112, 8126, 8140, 8135, 8210, 5008, 5001}},
+		Spells:     []int{14, 4},
+		Starter:    []int{1056, 2003, 2003},
+		Core:       []int{6655, 4645},
+		CoreStats:  Stats{WinRate: 0.55},
+		Boots:      []int{3020},
+		SkillOrder: []string{"Q", "E", "W"},
 	}
 	out := Apply(context.Background(), f, res, b, ApplyOptions{Runes: true, Items: true, Spells: true})
 	if len(out.Errors) != 0 || len(out.Done) != 3 {
@@ -210,6 +218,15 @@ func TestApply(t *testing.T) {
 	starter := blocks[0].(map[string]any)["items"].([]any)
 	if len(starter) != 2 || starter[1].(map[string]any)["count"].(float64) != 2 {
 		t.Errorf("potions should be grouped: %v", starter)
+	}
+	if title := blocks[1].(map[string]any)["type"]; title != "Objets principaux — 55,0 % de victoires" {
+		t.Errorf("core block title: %v", title)
+	}
+	if title := blocks[0].(map[string]any)["type"]; title != "Objets de départ" {
+		t.Errorf("no stats, no rate: %v", title)
+	}
+	if title := sets.ItemSets[1]["title"]; title != "OP.GG Ahri Milieu · Q > E > W" {
+		t.Errorf("item set title: %v", title)
 	}
 }
 
