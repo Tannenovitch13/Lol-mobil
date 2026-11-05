@@ -3,8 +3,12 @@ package builds
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -281,5 +285,50 @@ func TestApplyItemSetFile(t *testing.T) {
 	_ = json.Unmarshal(f.bodies["PUT /lol-item-sets/v1/item-sets/42/sets"], &put)
 	if len(put.ItemSets) != 1 || put.ItemSets[0]["uid"] != "mine" {
 		t.Errorf("old API set not removed: %+v", put)
+	}
+}
+
+type fakeProvider struct {
+	name string
+	res  *Result
+	err  error
+	n    int
+}
+
+func (f *fakeProvider) Name() string { return f.name }
+func (f *fakeProvider) Fetch(ctx context.Context, req Request) (*Result, error) {
+	f.n++
+	if f.err != nil {
+		return nil, f.err
+	}
+	r := *f.res
+	return &r, nil
+}
+
+// A site that cannot be reached (here a DNS failure, like on a user's PC)
+// gives OP.GG's builds instead of an error, and is not asked again at once.
+func TestFallbackToOPGG(t *testing.T) {
+	dns := &net.DNSError{Err: "no such host", Name: "datalake.v2.iesdev.com", IsNotFound: true}
+	blitz := &fakeProvider{name: "Blitz", err: fmt.Errorf("Blitz injoignable : %w", &url.Error{Op: "Post", URL: "https://datalake.v2.iesdev.com/graphql", Err: dns})}
+	opgg := &fakeProvider{name: "OP.GG", res: &Result{Builds: []Build{{Label: "Le plus joué"}}}}
+	s := &Service{Providers: map[string]Provider{"opgg": opgg, "blitz": blitz}}
+	req := Request{Source: "blitz", ChampionID: 103, Mode: "ranked"}
+	res, err := s.Fetch(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FallbackFrom != "Blitz" || res.SourceName != "OP.GG" || len(res.Builds) != 1 {
+		t.Fatalf("unexpected result %+v", res)
+	}
+	if !strings.Contains(res.FallbackReason, "introuvable") || !strings.Contains(res.FallbackReason, "datalake.v2.iesdev.com") {
+		t.Fatalf("reason %q", res.FallbackReason)
+	}
+	if _, err := s.Fetch(context.Background(), req); err != nil || blitz.n != 1 {
+		t.Fatalf("site asked again right away (%d times), err %v", blitz.n, err)
+	}
+	// OP.GG itself failing still reports the original error.
+	opgg.err = errors.New("down")
+	if _, err := s.Fetch(context.Background(), Request{Source: "blitz", ChampionID: 1, Mode: "ranked"}); err == nil || !strings.Contains(err.Error(), "Blitz") {
+		t.Fatalf("want the Blitz error, got %v", err)
 	}
 }

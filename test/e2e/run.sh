@@ -18,7 +18,8 @@ go build -o "$WORK/mock-lcu" ./cmd/mock-lcu
 go build -o "$WORK/companion" ./cmd/lolmobil-companion
 
 # -fail-champions: the champion list fails at first, the phone must retry.
-"$WORK/mock-lcu" -rose -step 1s -fail-champions 2 -fail-accept 1 > "$WORK/mock.log" 2>&1 &
+# -drop-lock: the first lock-in is lost, the phone must notice and send it again.
+"$WORK/mock-lcu" -rose -step 1s -fail-champions 2 -fail-accept 1 -drop-lock 1 > "$WORK/mock.log" 2>&1 &
 MOCK_PID=$!
 sleep 0.5
 LOLMOBIL_CONFIG_DIR="$WORK/cfg" "$WORK/companion" -lcu-url http://127.0.0.1:29999 -lcu-password test -no-browser -no-plugin-install -remote off \

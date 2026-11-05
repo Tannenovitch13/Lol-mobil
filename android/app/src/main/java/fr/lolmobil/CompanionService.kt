@@ -24,6 +24,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.concurrent.thread
 
 /**
  * Stays connected to the PC companion in the background and notifies:
@@ -43,6 +44,9 @@ class CompanionService : Service() {
         /** Accept/decline through the service's socket (remote access). */
         const val ACTION_READY = "fr.lolmobil.READY_CHECK"
         const val EXTRA_READY_ACTION = "action"
+
+        /** After the Wi-Fi failed, how long remote access is used before trying it again. */
+        private const val LAN_RETRY_MS = 60_000L
 
         private const val URI_READY = "/lol-matchmaking/v1/ready-check"
         private const val URI_PHASE = "/lol-gameflow/v1/gameflow-phase"
@@ -138,7 +142,7 @@ class CompanionService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (socket == null && mqtt == null) connect()
+        if (socket == null && mqtt == null && !connecting) connect()
         if (intent?.action == ACTION_READY) {
             sendReadyCheck(intent.getStringExtra(EXTRA_READY_ACTION) ?: "accept")
         }
@@ -165,30 +169,65 @@ class CompanionService : Service() {
 
     // ------------------------------------------------------------ socket
 
+    /** A Wi-Fi probe is running. */
+    private var connecting = false
+
+    /** When the Wi-Fi last failed: remote access is used for a while. */
+    private var lanFailedAt = 0L
+
+    /** The Wi-Fi when the PC answers there, else remote access. */
     private fun connect() {
+        val token = prefs.lanToken
+        val candidates = prefs.lanCandidates()
         val secret = prefs.remoteSecret
-        if (secret != null) {
-            // Remote access, end-to-end encrypted: through your relay, or
-            // through the public MQTT brokers.
-            val r = try {
-                Remote(secret)
-            } catch (e: Exception) {
-                stopSelf()
-                return
-            }
-            remote = r
-            val relay = prefs.baseUrl
-            if (relay == null) {
-                connectMqtt(r)
-                return
-            }
-            val request = Request.Builder().url(Remote.clientUrl(relay, r.roomId)).build()
-            socket = Net.relayClient.newWebSocket(request, Listener())
+        val lanWorth = token != null && candidates.isNotEmpty() &&
+            System.currentTimeMillis() - lanFailedAt > LAN_RETRY_MS
+        if (lanWorth && secret == null) {
+            connectLan(candidates.first(), token!!)
             return
         }
+        if (lanWorth && secret != null) {
+            connecting = true
+            thread {
+                val base = Net.firstReachable(candidates, token!!)
+                handler.post {
+                    connecting = false
+                    if (stopped || socket != null || mqtt != null) return@post
+                    if (base != null) {
+                        connectLan(base, token)
+                    } else {
+                        lanFailedAt = System.currentTimeMillis()
+                        connectRemote(secret)
+                    }
+                }
+            }
+            return
+        }
+        if (secret != null) connectRemote(secret) else if (token != null && candidates.isNotEmpty()) {
+            connectLan(candidates.first(), token)
+        }
+    }
+
+    /** Remote access, end-to-end encrypted: through your relay, or the public MQTT brokers. */
+    private fun connectRemote(secret: String) {
+        val r = try {
+            Remote(secret)
+        } catch (e: Exception) {
+            stopSelf()
+            return
+        }
+        remote = r
+        val relay = prefs.relayUrl
+        if (relay == null) {
+            connectMqtt(r)
+            return
+        }
+        val request = Request.Builder().url(Remote.clientUrl(relay, r.roomId)).build()
+        socket = Net.relayClient.newWebSocket(request, Listener())
+    }
+
+    private fun connectLan(base: String, token: String) {
         remote = null
-        val base = prefs.baseUrl ?: return
-        val token = prefs.token ?: return
         val url = base.replaceFirst("http", "ws") + "/ws?token=" + Uri.encode(token)
         val request = Request.Builder().url(url).build()
         socket = Net.client.newWebSocket(request, Listener())
@@ -289,7 +328,7 @@ class CompanionService : Service() {
                 if (brokerFailures % brokers().size != 0) 300L else retryMs
             }
             if (delay == retryMs) retryMs = (retryMs * 2).coerceAtMost(30_000L)
-            handler.postDelayed({ if (!stopped && mqtt == null && socket == null) connect() }, delay)
+            handler.postDelayed({ if (!stopped && mqtt == null && socket == null && !connecting) connect() }, delay)
         }
     }
 
@@ -334,17 +373,25 @@ class CompanionService : Service() {
 
     private fun onDisconnected(webSocket: WebSocket, unauthorized: Boolean) {
         if (socket !== webSocket) return
+        val wasLan = remote == null
         socket = null
         connected = false
         lcuConnected = false
         if (stopped) return
-        if (unauthorized) {
+        if (unauthorized && !prefs.hasRemote) {
             // The PC was reset: the app asks to pair again when opened.
             stopSelf()
             return
         }
+        if (wasLan && prefs.hasRemote) {
+            // Left the Wi-Fi of the PC: remote access right away.
+            lanFailedAt = System.currentTimeMillis()
+            updateStatus()
+            handler.postDelayed({ if (!stopped && socket == null && mqtt == null && !connecting) connect() }, 300L)
+            return
+        }
         updateStatus()
-        handler.postDelayed({ if (!stopped && socket == null) connect() }, retryMs)
+        handler.postDelayed({ if (!stopped && socket == null && mqtt == null && !connecting) connect() }, retryMs)
         retryMs = (retryMs * 2).coerceAtMost(30_000L)
     }
 

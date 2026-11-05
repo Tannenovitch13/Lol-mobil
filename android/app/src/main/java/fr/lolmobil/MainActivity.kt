@@ -56,6 +56,13 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var assetLoader: WebViewAssetLoader
 
+    /** What the page talks through: the Wi-Fi, or remote access. */
+    private enum class Mode { NONE, LAN, REMOTE }
+
+    private var mode = Mode.NONE
+    @Volatile
+    private var probing = false
+
     lateinit var webView: WebView
         private set
     private lateinit var prefs: Prefs
@@ -97,8 +104,8 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
                 if (url.scheme == "file" || url.host == BUNDLED_HOST) return false
-                val base = prefs.baseUrl?.let { Uri.parse(it) }
-                if (base != null && url.host == base.host && url.port == base.port) return false
+                val known = prefs.lanCandidates() + listOfNotNull(prefs.relayUrl)
+                if (known.any { Uri.parse(it).let { b -> b.host == url.host && b.port == url.port } }) return false
                 // Anything else (help links...) opens in the browser.
                 try {
                     startActivity(Intent(Intent.ACTION_VIEW, url))
@@ -127,6 +134,8 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         visible = true
+        // Back home with the app open on remote access: the Wi-Fi is faster.
+        if (mode == Mode.REMOTE) switchToLanIfReachable()
     }
 
     override fun onPause() {
@@ -144,19 +153,23 @@ class MainActivity : AppCompatActivity() {
         if (prefs.isPaired) openCompanion() else showConnect(null)
     }
 
+    /**
+     * The Wi-Fi when the PC answers there (direct, much faster), else remote
+     * access. With only one of them known, that one.
+     */
     fun openCompanion() {
-        val base = prefs.baseUrl
-        val token = prefs.token
+        val token = prefs.lanToken
         val secret = prefs.remoteSecret
         when {
-            secret != null && base != null -> webView.loadUrl("$base/#k=$secret")
-            secret != null -> {
-                // From anywhere through MQTT: the interface comes with the app.
-                val brokers = prefs.remoteBrokers?.let { "&m=$it" } ?: ""
-                webView.loadUrl("$BUNDLED_UI#k=$secret$brokers")
+            prefs.hasLan && secret != null -> {
+                val candidates = prefs.lanCandidates()
+                thread {
+                    val base = Net.firstReachable(candidates, token!!)
+                    main.post { if (base != null) openLan(base, token) else openRemote(secret) }
+                }
             }
-            base != null && token != null ->
-                webView.loadUrl("$BUNDLED_UI_LAN#lan=${Uri.encode(base)}&token=$token")
+            secret != null -> openRemote(secret)
+            prefs.hasLan -> openLan(prefs.lanCandidates().first(), token!!)
             else -> {
                 showConnect(null)
                 return
@@ -168,7 +181,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun openLan(base: String, token: String) {
+        mode = Mode.LAN
+        if (prefs.lanBase != base) prefs.lanBase = base
+        // If the Wi-Fi stops answering, the page asks for remote access
+        // (retry) when the app has the link (savedPc().remote).
+        webView.loadUrl("$BUNDLED_UI_LAN#lan=${Uri.encode(base)}&token=$token")
+    }
+
+    private fun openRemote(secret: String) {
+        mode = Mode.REMOTE
+        val relay = prefs.relayUrl
+        if (relay != null) {
+            webView.loadUrl("$relay/#k=$secret")
+            return
+        }
+        // From anywhere through MQTT: the interface comes with the app.
+        val brokers = prefs.remoteBrokers?.let { "&m=$it" } ?: ""
+        webView.loadUrl("$BUNDLED_UI#k=$secret$brokers")
+    }
+
+    /** On remote access: use the Wi-Fi instead if the PC answers there. */
+    fun switchToLanIfReachable() {
+        val token = prefs.lanToken ?: return
+        val candidates = prefs.lanCandidates()
+        if (candidates.isEmpty() || probing) return
+        probing = true
+        thread {
+            val base = Net.firstReachable(candidates, token)
+            probing = false
+            if (base != null) {
+                main.post { if (mode == Mode.REMOTE) openLan(base, token) }
+            }
+        }
+    }
+
+    /** Wi-Fi details sent by the PC through remote access. */
+    fun rememberLan(urls: List<String>, token: String) {
+        prefs.saveLanFromRemote(urls, token)
+        if (mode == Mode.REMOTE) switchToLanIfReachable()
+    }
+
     fun showConnect(error: String?) {
+        mode = Mode.NONE
         webView.loadUrl(if (error == null) CONNECT_PAGE else "$CONNECT_PAGE#error=$error")
     }
 
@@ -217,7 +272,7 @@ class MainActivity : AppCompatActivity() {
         thread {
             try {
                 val name = Net.check(base, token)
-                prefs.save(base, token, name)
+                prefs.saveLan(base, token, name)
                 main.post { openCompanion() }
             } catch (e: Exception) {
                 jsCallback("onQrResult", JSONObject().put("error", e.message ?: "Le PC ne répond pas"))
@@ -250,6 +305,7 @@ class MainActivity : AppCompatActivity() {
 
     fun disconnect() {
         CompanionService.stop(this)
+        mode = Mode.NONE
         prefs.clear()
         main.post {
             webView.clearHistory()

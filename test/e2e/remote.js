@@ -27,6 +27,16 @@ const LINK = process.env.LINK;
   await phone.waitForSelector('text=Banc', { timeout: 15000 });
   await phone.click('.tab:has-text("Runes")');
   await phone.waitForSelector('.page-item');
+  if (process.env.FAILOVER) {
+    // The broker in use goes down: the phone carries on through the other.
+    const before = await phone.evaluate(() => window.lolmobil.broker());
+    const addr = new URL(before.replace(/^ws/, 'http')).host;
+    await fetch(`http://127.0.0.1:29999/mock/broker-stop?addr=${addr}`);
+    await phone.waitForFunction((b) => window.lolmobil.broker() && window.lolmobil.broker() !== b, before, { timeout: 15000 });
+    await fetch('http://127.0.0.1:29999/mock/goto?state=ingame');
+    await phone.waitForSelector('text=Partie en cours', { timeout: 15000 });
+    console.log('broker switch OK:', before, '->', await phone.evaluate(() => window.lolmobil.broker()));
+  }
   await phone.click('.icon-btn');
   await phone.waitForSelector('text=à distance (chiffrée de bout en bout)');
   await phone.screenshot({ path: `${OUT}/remote-settings.png` });

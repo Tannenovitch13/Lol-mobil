@@ -31,9 +31,10 @@ class MqttClient(
     }
 
     companion object {
+        // HiveMQ (Frankfurt) first: closest for players in Europe.
         val DEFAULT_BROKERS = listOf(
-            "wss://broker.emqx.io:8084/mqtt",
             "wss://broker.hivemq.com:8884/mqtt",
+            "wss://broker.emqx.io:8084/mqtt",
             "wss://test.mosquitto.org:8081/mqtt",
         )
         private const val KEEPALIVE_S = 30

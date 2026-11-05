@@ -33,8 +33,9 @@ var (
 	password   = flag.String("password", "test", "basic auth password (user riot)")
 	withRose   = flag.Bool("rose", false, "also imitate Rose's bridge on 127.0.0.1:50000")
 	failAccept = flag.Int("fail-accept", 0, "fail the first N ready check accepts like a real client sometimes does")
+	dropLock   = flag.Int("drop-lock", 0, "lose the first N lock-ins (answered but not applied, like on a weak connection)")
 	flaky      = flag.Int("fail-champions", 0, "fail the first N champion list requests (tests the phone's retry)")
-	broker     = flag.String("mqtt", "", "also run a local MQTT broker (WebSocket) on this address, e.g. 127.0.0.1:1884")
+	broker     = flag.String("mqtt", "", "also run local MQTT brokers (WebSocket) on these comma-separated addresses, e.g. 127.0.0.1:1884")
 	speed      = flag.Duration("step", 1500*time.Millisecond, "delay of automatic steps (queue pop, other players' picks)")
 )
 
@@ -69,7 +70,7 @@ func main() {
 		go runRose()
 	}
 	if *broker != "" {
-		go runBroker(*broker)
+		runBrokers(*broker)
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	log.Printf("mock LCU on http://%s (user riot, password %s)", addr, *password)
@@ -579,6 +580,10 @@ var (
 )
 
 func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/mock/broker-stop" {
+		stopBroker(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/mock/goto") {
 		m.mu.Lock()
 		m.goTo(r.URL.Query().Get("state"))
@@ -912,6 +917,11 @@ func (m *mock) serveDynamic(w http.ResponseWriter, r *http.Request, body map[str
 				}
 			}
 			complete := mt[2] != "" || body["completed"] == true
+			if complete && *dropLock > 0 {
+				*dropLock--
+				w.WriteHeader(204)
+				return
+			}
 			if complete {
 				if a["isInProgress"] != true || a["championId"].(int) <= 0 {
 					writeJSON(w, 400, map[string]any{"message": "cannot complete"})

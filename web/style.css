@@ -703,6 +703,13 @@ input {
   border: none;
   padding: 0;
 }
+.notice {
+  border-left: 3px solid var(--gold);
+  padding: 6px 10px;
+  background: rgba(200, 170, 110, 0.08);
+  border-radius: 6px;
+  color: var(--text);
+}
 .bench-champ.locked {
   opacity: 0.55;
 }

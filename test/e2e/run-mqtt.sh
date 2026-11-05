@@ -15,13 +15,14 @@ cd "$ROOT"
 go build -o "$WORK/mock-lcu" ./cmd/mock-lcu
 go build -o "$WORK/companion" ./cmd/lolmobil-companion
 
-"$WORK/mock-lcu" -step 1s -mqtt 127.0.0.1:1884 > "$WORK/mock.log" 2>&1 &
+# Two brokers: the phone uses the fastest and switches when it drops.
+"$WORK/mock-lcu" -step 1s -mqtt 127.0.0.1:1884,127.0.0.1:1885 > "$WORK/mock.log" 2>&1 &
 MOCK_PID=$!
 python3 -m http.server 8798 --bind 127.0.0.1 --directory "$ROOT/web" > "$WORK/web.log" 2>&1 &
 WEB_PID=$!
 sleep 1
 LOLMOBIL_CONFIG_DIR="$WORK/cfg" "$WORK/companion" -lcu-url http://127.0.0.1:29999 -lcu-password test \
-  -no-browser -no-plugin-install -no-rose -brokers "${BROKERS:-ws://127.0.0.1:1884/mqtt}" \
+  -no-browser -no-plugin-install -no-rose -brokers "${BROKERS:-ws://127.0.0.1:1884/mqtt,ws://127.0.0.1:1885/mqtt}" \
   -web-url http://127.0.0.1:8798/index.html > "$WORK/companion.log" 2>&1 &
 COMP_PID=$!
 for _ in $(seq 1 50); do
@@ -30,6 +31,6 @@ for _ in $(seq 1 50); do
 done
 
 LINK="$(grep -o 'http://127.0.0.1:8798/index.html#k=[^ ]*' "$WORK/companion.log" | head -1)"
-OUT="$OUT" LINK="$LINK" node "$ROOT/test/e2e/remote.js" || {
+OUT="$OUT" LINK="$LINK" FAILOVER=1 node "$ROOT/test/e2e/remote.js" || {
   echo "---- companion.log"; cat "$WORK/companion.log"; echo "---- mock.log"; tail -40 "$WORK/mock.log"; exit 1;
 }

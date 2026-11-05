@@ -863,8 +863,11 @@ func (s *Server) statusMessage() map[string]any {
 	}
 }
 
+// lanAddresses is LANAddresses (replaced in tests).
+var lanAddresses = LANAddresses
+
 func (s *Server) helloMessage(c *client) map[string]any {
-	return map[string]any{
+	msg := map[string]any{
 		"type":     "hello",
 		"version":  s.Version,
 		"name":     s.Name,
@@ -873,6 +876,20 @@ func (s *Server) helloMessage(c *client) map[string]any {
 		"settings": s.settings(),
 		"rose":     s.Rose.Snapshot(),
 	}
+	if c.remote {
+		// How to reach this PC on its Wi-Fi: the app connects directly when
+		// the phone is on the same network (much faster than remote
+		// access). The remote link already gives full access, so handing
+		// it the Wi-Fi token gives nothing more.
+		var urls []string
+		for _, ip := range lanAddresses() {
+			urls = append(urls, fmt.Sprintf("http://%s:%d", ip, s.Cfg.Port))
+		}
+		if len(urls) > 0 && s.Cfg.Token != "" {
+			msg["lan"] = map[string]any{"urls": urls, "token": s.Cfg.Token}
+		}
+	}
+	return msg
 }
 
 // Summary is what the tray icon shows.

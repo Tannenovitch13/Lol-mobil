@@ -1,5 +1,5 @@
 import { html, useEffect, useMemo, useState } from "../vendor/preact-htm.js";
-import { act, lcu, observe, refresh, useLcu, useStore } from "./api.js";
+import { act, get, lcu, observe, refresh, store, useLcu, useStore } from "./api.js";
 import { championIcon, championTile, loadChampions, positionLabel, searchKey, useData } from "./data.js";
 import { SkinsTab } from "./skins.js";
 import { RunesTab } from "./runes.js";
@@ -261,12 +261,7 @@ function CardPicker({ action, cards, fallback }) {
   const choose = async (championId) => {
     if (sent) return;
     setSent(championId);
-    const ok = await act(
-      lcu("PATCH", `/lol-champ-select/v1/session/actions/${action.id}`, {
-        championId,
-        completed: true,
-      }).then(() => true)
-    );
+    const ok = await act(lockAction(action, championId));
     if (!ok) setSent(null);
   };
 
@@ -308,18 +303,45 @@ function CardPicker({ action, cards, fallback }) {
   </section>`;
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// State of an action in a session: "done", "open" (still ours to do) or
+// "gone" (turn over, champion select ended).
+function actionState(session, id) {
+  if (!session) return "gone";
+  const a = (session.actions || []).flat().find((x) => x.id === id);
+  if (!a) return "gone";
+  if (a.completed) return "done";
+  return a.isInProgress ? "open" : "gone";
+}
+
+// Lock in like the client does (rcp-fe-lol-champ-select selectChampion with
+// completed=true): one PATCH carrying the champion, one round trip instead
+// of two. Then make sure the client took it: a request lost on a weak
+// connection is sent again while the turn lasts.
 async function lockAction(action, championId) {
   const path = `/lol-champ-select/v1/session/actions/${action.id}`;
-  // The tap may still be on its way: make sure the client has the champion.
-  if (championId > 0 && action.championId !== championId) {
-    await lcu("PATCH", path, { championId });
-  }
+  const body = { championId, completed: true };
   try {
-    await lcu("POST", `${path}/complete`);
+    await lcu("PATCH", path, body);
   } catch (e) {
-    // Older clients complete the action with a PATCH.
-    await lcu("PATCH", path, { championId: championId || action.championId, completed: true });
+    if (e.status !== 404 && e.status !== 405) throw e;
+    // Clients that only complete through /complete.
+    await lcu("PATCH", path, { championId });
+    await lcu("POST", `${path}/complete`);
   }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await sleep(900);
+    if (actionState(store.lcu[SESSION], action.id) !== "open") return true;
+    // The event may be late: ask the client.
+    const state = actionState(await get(SESSION).catch(() => null), action.id);
+    if (state !== "open") {
+      refresh(SESSION);
+      return true;
+    }
+    await lcu("PATCH", path, body).catch(() => {});
+  }
+  throw new Error("Le client n'a pas verrouillé : réessaie");
 }
 
 function ActionPanel({ session, active, futurePick, planning, cards, cardMode }) {
@@ -328,6 +350,7 @@ function ActionPanel({ session, active, futurePick, planning, cards, cardMode })
   const [showFuture, setShowFuture] = useState(false);
   // The champion tapped, shown at once (the client confirms a bit later).
   const [tapped, setTapped] = useState(null);
+  const [locking, setLocking] = useState(null); // action id being locked
 
   useEffect(() => {
     refresh(PICKABLE);
@@ -339,7 +362,16 @@ function ActionPanel({ session, active, futurePick, planning, cards, cardMode })
 
   const hover = (action, championId) => {
     setTapped({ actionId: action.id, championId });
-    act(lcu("PATCH", `/lol-champ-select/v1/session/actions/${action.id}`, { championId }));
+    // Only a preview: the lock carries the champion itself, so a hover that
+    // fails or arrives after it changes nothing.
+    lcu("PATCH", `/lol-champ-select/v1/session/actions/${action.id}`, { championId }).catch(() => {});
+  };
+
+  const lock = async (action) => {
+    if (locking === action.id) return;
+    setLocking(action.id);
+    await act(lockAction(action, chosen(action)));
+    setLocking(null);
   };
 
   if (active) {
@@ -361,10 +393,10 @@ function ActionPanel({ session, active, futurePick, planning, cards, cardMode })
       <div class="sticky-actions">
         <button
           class="btn big wide ${isBan ? "danger" : ""}"
-          disabled=${!(chosen(active) > 0)}
-          onClick=${() => act(lockAction(active, chosen(active)))}
+          disabled=${!(chosen(active) > 0) || locking === active.id}
+          onClick=${() => lock(active)}
         >
-          ${isBan ? "Bannir" : "Verrouiller"}
+          ${locking === active.id ? "Verrouillage…" : isBan ? "Bannir" : "Verrouiller"}
         </button>
       </div>
     </section>`;

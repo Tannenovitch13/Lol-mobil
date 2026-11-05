@@ -11,6 +11,7 @@ import {
   store,
   initConnection,
   isRemoteMode,
+  activeBroker,
   toast,
   useLcu,
   useStore,
@@ -341,4 +342,4 @@ render(html`<${App} />`, document.getElementById("app"));
 initConnection();
 
 // Exposed for debugging from the console.
-window.lolmobil = { store };
+window.lolmobil = { store, broker: activeBroker };

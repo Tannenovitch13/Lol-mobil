@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/tannenovitch13/lol-mobil/internal/netx"
 )
 
 // Session is one phone connected through the relay.
@@ -79,7 +80,7 @@ func (h *Host) Run(ctx context.Context) {
 	retry := time.Second
 	logged := false
 	for ctx.Err() == nil {
-		dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, Proxy: http.ProxyFromEnvironment}
+		dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, Proxy: http.ProxyFromEnvironment, NetDialContext: netx.DialContext}
 		conn, resp, err := dialer.DialContext(ctx, target, nil)
 		if err != nil {
 			if !logged {

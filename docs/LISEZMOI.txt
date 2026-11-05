@@ -33,12 +33,16 @@ runes et sorts.
 4. Hors de chez toi (pas le même Wi-Fi, 4G) : rien à configurer. Scanne une
    fois le QR code « Accès à distance » de la page d'appairage avec l'appli.
    Les échanges passent par des serveurs MQTT publics gratuits, chiffrés de
-   bout en bout. Pour couper : LolMobil-Companion.exe -remote off
+   bout en bout. Chez toi, sur le même Wi-Fi que le PC, l'appli passe toute
+   seule en connexion directe (plus rapide). Si le pare-feu Windows demande
+   l'autorisation pour LolMobil Companion, accepte sur les réseaux privés.
+   Pour couper l'accès à distance : LolMobil-Companion.exe -remote off
 
 5. Builds OP.GG / Blitz : dans la sélection des champions, onglet « Builds »,
    choisis un build populaire et touche « Appliquer » : page de runes, set
    d'objets (boutique en jeu) et sorts. Option pour le faire
-   automatiquement au verrouillage du champion.
+   automatiquement au verrouillage du champion. Si Blitz est injoignable
+   depuis le PC, les builds OP.GG sont utilisés à la place.
 
 Options utiles (dans un terminal) :
   LolMobil-Companion.exe -pair              ouvre la page avec le QR code

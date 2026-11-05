@@ -22,8 +22,10 @@ class NotificationActionReceiver : BroadcastReceiver() {
             else -> return
         }
         val prefs = Prefs(context)
-        if (prefs.isRemote) {
-            // Through the relay: the service owns the encrypted connection.
+        val base = prefs.lanBase
+        val token = prefs.lanToken
+        if (base == null || token == null || prefs.hasRemote) {
+            // The service owns the connection (Wi-Fi or remote access).
             val service = Intent(context, CompanionService::class.java)
                 .setAction(CompanionService.ACTION_READY)
                 .putExtra(CompanionService.EXTRA_READY_ACTION, action)
@@ -34,8 +36,6 @@ class NotificationActionReceiver : BroadcastReceiver() {
             }
             return
         }
-        val base = prefs.baseUrl ?: return
-        val token = prefs.token ?: return
         val pending = goAsync()
         thread {
             try {

@@ -29,7 +29,7 @@ class WebBridge(private val activity: MainActivity) {
             try {
                 val device = listOfNotNull(Build.MANUFACTURER, Build.MODEL).joinToString(" ").ifEmpty { "Android" }
                 val paired = Net.pair(base, pin.trim(), device)
-                prefs.save(base, paired.token, paired.name)
+                prefs.saveLan(base, paired.token, paired.name)
                 activity.jsCallback("onPairResult", JSONObject().put("ok", true))
                 activity.runOnUiThread { activity.openCompanion() }
             } catch (e: Exception) {
@@ -49,21 +49,20 @@ class WebBridge(private val activity: MainActivity) {
         activity.startScan()
     }
 
-    /** Called by the companion's page when the PIN was typed there. */
+    /** Called by the page when the PIN was typed there (Wi-Fi). */
     @JavascriptInterface
     fun onPaired(token: String) {
-        if (prefs.isRemote) return
         activity.runOnUiThread {
             val uri = activity.webView.url?.let { Uri.parse(it) } ?: return@runOnUiThread
-            val saved = prefs.baseUrl
-            if (uri.host == MainActivity.BUNDLED_HOST && saved != null) {
+            if (uri.host == MainActivity.BUNDLED_HOST) {
                 // Bundled interface: same PC, new token.
-                prefs.save(saved, token, prefs.pcName)
+                val saved = prefs.lanBase ?: return@runOnUiThread
+                prefs.saveLan(saved, token, prefs.pcName)
                 return@runOnUiThread
             }
             val host = uri.host
             if (uri.scheme != "http" || host.isNullOrEmpty()) return@runOnUiThread
-            prefs.save(Net.baseUrl(host, if (uri.port > 0) uri.port else 80), token, prefs.pcName)
+            prefs.saveLan(Net.baseUrl(host, if (uri.port > 0) uri.port else 80), token, prefs.pcName)
             if (prefs.notifications) {
                 activity.ensureNotificationPermission()
                 CompanionService.start(activity)
@@ -78,9 +77,9 @@ class WebBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun useCompanionPage() {
         activity.runOnUiThread {
-            val base = prefs.baseUrl
-            val token = prefs.token
-            if (base != null && token != null && !prefs.isRemote) {
+            val base = prefs.lanBase
+            val token = prefs.lanToken
+            if (base != null && token != null) {
                 activity.webView.loadUrl("$base/#token=$token")
             }
         }
@@ -127,10 +126,29 @@ class WebBridge(private val activity: MainActivity) {
 
     @JavascriptInterface
     fun savedPc(): String = JSONObject()
-        .put("baseUrl", prefs.baseUrl ?: "")
+        .put("baseUrl", prefs.lanBase ?: "")
         .put("name", prefs.pcName ?: "")
-        .put("remote", prefs.isRemote)
+        .put("remote", prefs.hasRemote)
         .toString()
+
+    /**
+     * Wi-Fi details the PC sends through remote access ({urls, token}): the
+     * app then connects directly when on the same network.
+     */
+    @JavascriptInterface
+    fun rememberLan(json: String) {
+        val data = try {
+            JSONObject(json)
+        } catch (e: Exception) {
+            return
+        }
+        val token = data.optString("token")
+        val list = data.optJSONArray("urls") ?: return
+        val urls = (0 until list.length()).map { list.optString(it) }
+            .filter { it.startsWith("http://") && it.length < 100 }
+        if (token.length < 16 || urls.isEmpty()) return
+        activity.runOnUiThread { activity.rememberLan(urls, token) }
+    }
 
     /** Remote access link typed or pasted by hand. */
     @JavascriptInterface

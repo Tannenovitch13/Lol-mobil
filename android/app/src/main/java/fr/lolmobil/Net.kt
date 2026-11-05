@@ -65,6 +65,44 @@ object Net {
         }
     }
 
+    private val probeClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .connectTimeout(1500, TimeUnit.MILLISECONDS)
+            .readTimeout(1500, TimeUnit.MILLISECONDS)
+            .callTimeout(2500, TimeUnit.MILLISECONDS)
+            .build()
+    }
+
+    /**
+     * The first of these Wi-Fi addresses where the companion answers with
+     * this token, or null (not on the same network). All are tried at once,
+     * for 2.5 s at most.
+     */
+    fun firstReachable(bases: List<String>, token: String): String? {
+        if (bases.isEmpty()) return null
+        val found = java.util.concurrent.LinkedBlockingQueue<String>()
+        val done = java.util.concurrent.atomic.AtomicInteger(0)
+        for (base in bases) {
+            Thread {
+                try {
+                    val request = Request.Builder()
+                        .url("$base/api/check")
+                        .header("Authorization", "Bearer $token")
+                        .build()
+                    probeClient.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) found.offer(base)
+                    }
+                } catch (e: Exception) {
+                    // not here
+                } finally {
+                    if (done.incrementAndGet() == bases.size) found.offer("")
+                }
+            }.start()
+        }
+        val first = found.poll(3, TimeUnit.SECONDS)
+        return first?.takeIf { it.isNotEmpty() }
+    }
+
     /** Checks that a URL is a LolMobil relay. */
     @Throws(IOException::class)
     fun checkRelay(base: String) {

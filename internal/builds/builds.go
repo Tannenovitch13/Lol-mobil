@@ -11,11 +11,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tannenovitch13/lol-mobil/internal/netx"
 )
 
 // Request selects the builds to fetch.
@@ -81,6 +84,10 @@ type Result struct {
 	Stats      Stats    `json:"stats"` // champion overall in that role
 	Builds     []Build  `json:"builds"`
 	FetchedAt  int64    `json:"fetchedAt"`
+	// Set when the chosen site could not be reached and these builds come
+	// from OP.GG instead: its name and why.
+	FallbackFrom   string `json:"fallbackFrom,omitempty"`
+	FallbackReason string `json:"fallbackReason,omitempty"`
 }
 
 // Provider fetches builds from one site.
@@ -110,7 +117,7 @@ const cacheFor = 30 * time.Minute
 // NewService returns the default providers. Base URLs can be overridden
 // (tests, or if a site moves).
 func NewService(opggURL, blitzURL string) *Service {
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{Timeout: 20 * time.Second, Transport: netx.Transport()}
 	return &Service{Providers: map[string]Provider{
 		"opgg":  &OPGG{BaseURL: opggURL, HTTP: client},
 		"blitz": &Blitz{URL: blitzURL, HTTP: client},
@@ -132,29 +139,77 @@ func (s *Service) Fetch(ctx context.Context, req Request) (*Result, error) {
 	if req.ChampionID <= 0 {
 		return nil, errors.New("aucun champion choisi")
 	}
-	key := fmt.Sprintf("%s|%d|%s|%s|%s|%s", req.Source, req.ChampionID, req.Position, req.Mode, req.Tier, req.Region)
-	s.mu.Lock()
-	if c, ok := s.cache[key]; ok && time.Since(c.at) < cacheFor {
-		s.mu.Unlock()
-		return c.res, nil
+	key := cacheKey(req)
+	if res := s.cached(key, cacheFor); res != nil {
+		return res, nil
 	}
-	s.mu.Unlock()
 	res, err := p.Fetch(ctx, req)
 	if err != nil {
-		return nil, err
+		err = friendlyError(p.Name(), err)
+		alt := s.Providers["opgg"]
+		if req.Source == "opgg" || alt == nil || errors.Is(err, ErrUnsupported) {
+			return nil, err
+		}
+		// The site cannot be reached from this PC (network, DNS, site
+		// changed): OP.GG's builds rather than nothing.
+		altReq := req
+		altReq.Source = "opgg"
+		fallback, altErr := s.Fetch(ctx, altReq)
+		if altErr != nil {
+			return nil, err
+		}
+		copied := *fallback
+		copied.FallbackFrom = p.Name()
+		copied.FallbackReason = err.Error()
+		// Try the site again in a few minutes, not at every tap.
+		s.store(key, &copied, time.Now().Add(-(cacheFor - 5*time.Minute)))
+		return &copied, nil
 	}
 	res.Source = req.Source
 	res.SourceName = p.Name()
 	res.ChampionID = req.ChampionID
 	res.Mode = req.Mode
 	res.FetchedAt = time.Now().UnixMilli()
+	s.store(key, res, time.Now())
+	return res, nil
+}
+
+func cacheKey(req Request) string {
+	return fmt.Sprintf("%s|%d|%s|%s|%s|%s", req.Source, req.ChampionID, req.Position, req.Mode, req.Tier, req.Region)
+}
+
+func (s *Service) cached(key string, maxAge time.Duration) *Result {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c, ok := s.cache[key]; ok && time.Since(c.at) < maxAge {
+		return c.res
+	}
+	return nil
+}
+
+func (s *Service) store(key string, res *Result, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.cache == nil {
 		s.cache = map[string]cached{}
 	}
-	s.cache[key] = cached{time.Now(), res}
-	s.mu.Unlock()
-	return res, nil
+	s.cache[key] = cached{at, res}
+}
+
+// friendlyError explains network failures in plain words.
+func friendlyError(site string, err error) error {
+	if errors.Is(err, ErrUnsupported) {
+		return err
+	}
+	var dnsErr *net.DNSError
+	var netErr net.Error
+	switch {
+	case errors.As(err, &dnsErr):
+		return fmt.Errorf("%s injoignable depuis ce PC : adresse %s introuvable (DNS du réseau)", site, dnsErr.Name)
+	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()):
+		return fmt.Errorf("%s ne répond pas (délai dépassé)", site)
+	}
+	return err
 }
 
 // ModeForQueue maps a gameflow game mode to a build mode.

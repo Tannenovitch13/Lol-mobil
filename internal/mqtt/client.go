@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/tannenovitch13/lol-mobil/internal/netx"
 )
 
 // Options to connect.
@@ -91,6 +92,7 @@ func Dial(ctx context.Context, o Options) (*Client, error) {
 		HandshakeTimeout: 10 * time.Second,
 		Subprotocols:     []string{"mqtt"},
 		Proxy:            http.ProxyFromEnvironment,
+		NetDialContext:   netx.DialContext,
 	}
 	conn, resp, err := dialer.DialContext(ctx, o.URL, http.Header{})
 	if err != nil {

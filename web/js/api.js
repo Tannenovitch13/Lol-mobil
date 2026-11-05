@@ -234,8 +234,14 @@ export function connect() {
   socket = ws;
   setStore({ connection: store.connection === "open" ? "connecting" : store.connection });
   let opened = false;
+  // Away from the PC's Wi-Fi a connection can hang for a minute: give up
+  // sooner, so the app can switch to remote access.
+  const openTimer = setTimeout(() => {
+    if (!opened) ws.close();
+  }, 5000);
 
   ws.onopen = () => {
+    clearTimeout(openTimer);
     opened = true;
     lanFailures = 0;
     retryMs = 800;
@@ -252,6 +258,7 @@ export function connect() {
     handleMessage(msg);
   };
   ws.onclose = async () => {
+    clearTimeout(openTimer);
     if (socket !== ws) return;
     socket = null;
     for (const [, p] of pending) p.reject(new Error("Connexion perdue"));
@@ -264,11 +271,20 @@ export function connect() {
     if (lanBase && !opened) {
       lanFailures++;
       const android = window.LolMobilAndroid;
-      // The PC answers but this page cannot reach it: let the app load the
-      // companion's own page instead.
-      if (lanFailures >= 3 && android && android.useCompanionPage && (await companionReachable())) {
-        android.useCompanionPage();
-        return;
+      if (lanFailures >= 2 && android) {
+        const reachable = await companionReachable();
+        // Not on the PC's Wi-Fi (any more): the app switches to remote
+        // access when it has the link.
+        if (!reachable && hasRemoteAccess() && android.retry) {
+          android.retry();
+          return;
+        }
+        // The PC answers but this page cannot reach it: let the app load
+        // the companion's own page instead.
+        if (reachable && lanFailures >= 3 && android.useCompanionPage) {
+          android.useCompanionPage();
+          return;
+        }
       }
     }
     setStore({ connection: "closed", status: { ...store.status, lcu: false } });
@@ -304,6 +320,7 @@ function hostPresence(online) {
 
 function lostConnection() {
   clearInterval(pingTimer);
+  if (mode === "mqtt") closeLinks();
   sendWire = null;
   for (const [, p] of pending) p.reject(new Error("Connexion perdue"));
   pending.clear();
@@ -313,55 +330,182 @@ function lostConnection() {
 }
 
 // ---- through public MQTT brokers
+//
+// Every broker is dialed at once. The first one through which the PC
+// answers a ping carries the session: the fastest path right now (a broker
+// across the ocean adds a lot to every tap). The others stay connected,
+// listening to the PC's presence only, and take over at once if it drops.
 
-let brokerIndex = 0;
+let mqttGen = 0;
+let mqttId = "";
+let links = []; // { url, client, online, known, probing, pingId, buffer }
+let activeLink = null;
+const redialMs = new Map(); // broker url -> next delay
 const randomId = () => [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, "0")).join("");
+const mqttPrefix = () => `lolmobil/v1/${remote.room}`;
+const frame = (t, d) => JSON.stringify(d === undefined ? { t, c: mqttId } : { t, c: mqttId, d });
 
-async function connectMqtt() {
+// Broker carrying the session (for tests and debugging).
+export const activeBroker = () => (activeLink ? activeLink.url : "");
+
+function closeLinks() {
+  const hostTopic = `${mqttPrefix()}/host`;
+  for (const link of links) {
+    if (link === activeLink || link.probing) link.client.publish(hostTopic, frame("close"));
+    link.client.onclose = null;
+    link.client.close();
+  }
+  links = [];
+  activeLink = null;
+  sendWire = null;
+}
+
+function connectMqtt() {
+  const gen = ++mqttGen;
+  closeLinks();
+  mqttId = randomId();
   const brokers = getBrokers(DEFAULT_BROKERS);
-  const prefix = `lolmobil/v1/${remote.room}`;
-  const id = randomId();
-  const hostTopic = `${prefix}/host`;
-  for (let attempt = 0; attempt < brokers.length; attempt++) {
-    const url = brokers[(brokerIndex + attempt) % brokers.length];
-    const client = new MqttClient(url, {
-      clientId: "lmc-" + id,
-      keepAlive: 30,
-      will: { topic: hostTopic, payload: JSON.stringify({ t: "close", c: id }), retain: false },
-    });
-    try {
-      await client.connect();
-    } catch (e) {
-      continue;
-    }
-    brokerIndex = (brokerIndex + attempt) % brokers.length;
-    retryMs = 800;
-    socket = client;
-    client.onmessage = (topic, text) => {
-      if (topic === `${prefix}/presence`) {
-        if (text === "1") client.publish(hostTopic, JSON.stringify({ t: "open", c: id }));
-        hostPresence(text === "1");
-      } else {
-        receiveWire(text);
+  let failed = 0;
+  for (const url of brokers) {
+    dialLink(url, gen).catch(() => {
+      failed++;
+      if (gen === mqttGen && failed === brokers.length && !links.length) {
+        // No broker reachable: try again later.
+        setStore({ connection: "closed" });
+        setTimeout(() => gen === mqttGen && connect(), retryMs);
+        retryMs = Math.min(retryMs * 1.7, 15000);
       }
-    };
-    client.onclose = () => {
-      if (socket !== client) return;
-      socket = null;
-      lostConnection();
-    };
-    sendWire = (wire) => client.publish(hostTopic, JSON.stringify({ t: "msg", c: id, d: wire }));
-    client.subscribe(`${prefix}/c/${id}`);
-    // Retained: tells right away whether the PC is online.
-    client.subscribe(`${prefix}/presence`);
-    setStore({ connection: "pc-offline" });
+    });
+  }
+}
+
+async function dialLink(url, gen) {
+  const prefix = mqttPrefix();
+  const client = new MqttClient(url, {
+    clientId: "lmc-" + mqttId,
+    keepAlive: 30,
+    // Tells the PC this session is over if the phone vanishes.
+    will: { topic: `${prefix}/host`, payload: frame("close"), retain: false },
+  });
+  await client.connect();
+  if (gen !== mqttGen) {
+    client.close();
     return;
   }
-  // No broker reachable: try again later, starting with the next one.
-  brokerIndex = (brokerIndex + 1) % brokers.length;
-  setStore({ connection: "closed" });
-  setTimeout(connect, retryMs);
-  retryMs = Math.min(retryMs * 1.7, 15000);
+  redialMs.delete(url);
+  const link = { url, client, online: false, known: false, probing: false, pingId: 0, buffer: [] };
+  links.push(link);
+  client.onmessage = (topic, text) => onLinkMessage(link, topic, text);
+  client.onclose = () => onLinkClosed(link, gen);
+  client.subscribe(`${prefix}/c/${mqttId}`);
+  // Retained: tells right away whether the PC is online on this broker.
+  client.subscribe(`${prefix}/presence`);
+  if (store.connection === "closed") setStore({ connection: "connecting" });
+}
+
+function onLinkMessage(link, topic, text) {
+  if (topic === `${mqttPrefix()}/presence`) {
+    link.online = text === "1";
+    link.known = true;
+    if (link === activeLink) {
+      if (link.online) {
+        // The PC came back on this broker: new session.
+        link.client.publish(`${mqttPrefix()}/host`, frame("open"));
+        hostPresence(true);
+      } else {
+        switchLink();
+      }
+      return;
+    }
+    if (!activeLink) {
+      if (link.online) probeLink(link);
+      else if (links.every((l) => l.known && !l.online)) hostPresence(false);
+    }
+    return;
+  }
+  if (link === activeLink) {
+    receiveWire(text);
+    return;
+  }
+  if (!link.probing) return;
+  link.buffer.push(text);
+  open(remote.key, text)
+    .then((plain) => {
+      const msg = JSON.parse(plain);
+      if (msg.type === "pong" && msg.id === link.pingId && link.probing && !activeLink) activate(link);
+    })
+    .catch(() => {});
+}
+
+// Opens a session through this broker and times a ping through the PC.
+async function probeLink(link) {
+  if (link.probing) return;
+  link.probing = true;
+  link.buffer = [];
+  link.pingId = nextId++;
+  const hostTopic = `${mqttPrefix()}/host`;
+  link.client.publish(hostTopic, frame("open"));
+  const wire = await seal(remote.key, JSON.stringify({ type: "ping", id: link.pingId }));
+  link.client.publish(hostTopic, frame("msg", wire));
+}
+
+function activate(link) {
+  const hostTopic = `${mqttPrefix()}/host`;
+  activeLink = link;
+  socket = link.client;
+  retryMs = 800;
+  sendWire = (wire) => link.client.publish(hostTopic, frame("msg", wire));
+  // The slower brokers: free their session on the PC, keep them as standbys.
+  for (const other of links) {
+    if (other !== link && other.probing) {
+      other.client.publish(hostTopic, frame("close"));
+      other.probing = false;
+      other.buffer = [];
+    }
+  }
+  const buffered = link.buffer;
+  link.probing = false;
+  link.buffer = [];
+  for (const text of buffered) receiveWire(text); // hello, pong
+  hostPresence(true);
+}
+
+// The active broker lost the PC or the connection: another one at once.
+function switchLink() {
+  const old = activeLink;
+  activeLink = null;
+  sendWire = null;
+  for (const [, p] of pending) p.reject(new Error("Connexion perdue"));
+  pending.clear();
+  const next = links.find((l) => l !== old && l.online);
+  if (next) {
+    next.client.publish(`${mqttPrefix()}/host`, frame("open"));
+    next.probing = true;
+    activate(next);
+    return;
+  }
+  if (links.some((l) => l.online === false && l.known) && !links.some((l) => !l.known)) {
+    hostPresence(false);
+  } else {
+    setStore({ connection: "connecting", status: { ...store.status, lcu: false } });
+  }
+}
+
+function onLinkClosed(link, gen) {
+  links = links.filter((l) => l !== link);
+  if (gen !== mqttGen) return;
+  if (link === activeLink) switchLink();
+  if (!links.length) {
+    // Every broker dropped (the phone's network, most likely): start over.
+    lostConnection();
+    return;
+  }
+  // Dial this broker again in the background.
+  const delay = redialMs.get(link.url) || 3000;
+  redialMs.set(link.url, Math.min(delay * 2, 60000));
+  setTimeout(() => {
+    if (gen === mqttGen) dialLink(link.url, gen).catch(() => {});
+  }, delay);
 }
 
 // ---- through your Cloudflare relay
@@ -401,9 +545,37 @@ function connectRelay() {
 
 let lanFailures = 0;
 
+function hasRemoteAccess() {
+  const android = window.LolMobilAndroid;
+  try {
+    return Boolean(android && android.savedPc && JSON.parse(android.savedPc()).remote);
+  } catch (e) {
+    return false;
+  }
+}
+
+// The PC's Wi-Fi details, sent through remote access: the app connects
+// directly next time the phone is on the same network (much faster).
+function rememberLan(lan) {
+  const android = window.LolMobilAndroid;
+  if (!android || !android.rememberLan || !lan) return;
+  try {
+    android.rememberLan(JSON.stringify(lan));
+  } catch (e) {
+    /* older app */
+  }
+}
+
+// fetch that gives up after a few seconds (unreachable address).
+function quickFetch(url, ms = 2500) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { cache: "no-store", signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
 async function companionReachable() {
   try {
-    const res = await fetch(apiURL("/api/info"), { cache: "no-store" });
+    const res = await quickFetch(apiURL("/api/info"));
     return res.ok;
   } catch (e) {
     return false;
@@ -412,7 +584,7 @@ async function companionReachable() {
 
 async function tokenRejected() {
   try {
-    const res = await fetch(apiURL(`/api/check?token=${encodeURIComponent(getToken())}`));
+    const res = await quickFetch(apiURL(`/api/check?token=${encodeURIComponent(getToken())}`));
     return res.status === 401;
   } catch (e) {
     return false;
@@ -439,6 +611,7 @@ function send(msg) {
 function handleMessage(msg) {
   switch (msg.type) {
     case "hello": {
+      if (isRemoteMode() && msg.lan) rememberLan(msg.lan);
       const rose = {};
       for (const [k, v] of Object.entries(msg.rose || {})) rose[k] = v;
       setStore({

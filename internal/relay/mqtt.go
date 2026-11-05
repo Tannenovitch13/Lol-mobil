@@ -15,8 +15,8 @@ import (
 // DefaultBrokers are free public MQTT brokers (WebSocket over TLS). No
 // account is needed; they only ever see the room id and ciphertext.
 var DefaultBrokers = []string{
-	"wss://broker.emqx.io:8084/mqtt",
 	"wss://broker.hivemq.com:8884/mqtt",
+	"wss://broker.emqx.io:8084/mqtt",
 	"wss://test.mosquitto.org:8081/mqtt",
 }
 

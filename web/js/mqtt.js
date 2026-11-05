@@ -5,9 +5,11 @@
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
+// All are dialed at once; the fastest one through which the PC answers is
+// used (see connectMqtt in api.js).
 export const DEFAULT_BROKERS = [
-  "wss://broker.emqx.io:8084/mqtt",
   "wss://broker.hivemq.com:8884/mqtt",
+  "wss://broker.emqx.io:8084/mqtt",
   "wss://test.mosquitto.org:8081/mqtt",
 ];
 

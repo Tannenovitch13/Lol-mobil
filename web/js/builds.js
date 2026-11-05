@@ -252,6 +252,12 @@ export function BuildsTab({ myCell }) {
       )}
     </div>`}
     ${result &&
+    result.fallbackFrom &&
+    html`<p class="notice small">
+      ${result.fallbackReason || `${result.fallbackFrom} injoignable`}. Builds ${result.sourceName} affichés à la
+      place.
+    </p>`}
+    ${result &&
     html`<p class="small muted">
       ${result.sourceName} · patch ${result.patch || "?"}${result.stats && result.stats.winRate
         ? ` · ${pct(result.stats.winRate)} de victoires`
