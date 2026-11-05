@@ -20,10 +20,10 @@ le téléphone, tu peux choisir n'importe quel skin, même non possédé, et Ros
 
 | | |
 |---|---|
-| **Salon** | liste des modes (Classé, Normal, Partie rapide, ARAM, Arène, contre l'IA…), création/sortie du salon, rôles principal/secondaire, invitations reçues |
+| **Salon** | liste des modes (Classé, Normal, Partie rapide, ARAM, ARAM : Chaos, Arène, contre l'IA…), **outil d'entraînement** (créé et lancé comme le fait le client), création/sortie du salon, rôles principal/secondaire, invitations reçues |
 | **File** | lancer/annuler la recherche, temps écoulé et estimé |
 | **Partie trouvée** | Accepter / Refuser avec compte à rebours. Sur Android, une **notification avec boutons Accepter/Refuser** arrive même écran éteint. Option « accepter automatiquement » côté PC |
-| **Sélection des champions** | équipes, bans, minuteur, recherche de champion, survol, verrouillage, intention en phase de planification, banc ARAM et relance, échanges reçus/proposés. Notification « à toi de jouer » sur Android |
+| **Sélection des champions** | équipes, bans, minuteur, recherche de champion, survol, verrouillage, intention en phase de planification, **cartes de champions ARAM / ARAM : Chaos** (2 cartes ou 3 avec la carte chanceuse, un toucher pour choisir), banc et relance, échanges reçus/proposés. Notification « à toi de jouer » sur Android |
 | **Skins** | tous les skins du champion. Ceux que tu possèdes sont sélectionnés par le client. **Avec Rose, ceux que tu ne possèdes pas aussi**, ainsi que les chromas |
 | **Builds OP.GG / Blitz** | les builds les plus joués de ton champion pour ton rôle (ou en ARAM/URF), avec taux de victoire. En un clic : **page de runes**, **set d'objets** dans la boutique en jeu (départ, principaux, bottes, ensuite, ordre des compétences) et **sorts** (Saut éclair reste sur ta touche). Option « appliquer automatiquement » au verrouillage du champion, comme les applis Blitz et OP.GG |
 | **Runes** | choix de la page active, éditeur complet (arbres, runes, fragments), **pages recommandées** du client en un clic |
@@ -188,7 +188,7 @@ go test ./...                                   # tests unitaires
 go run ./cmd/mock-lcu -rose                     # faux client LoL (+ faux Rose) sur :29999
 go run ./cmd/lolmobil-companion -lcu-url http://127.0.0.1:29999 -lcu-password test
 # puis ouvre http://127.0.0.1:8787 (code affiché dans le terminal)
-# raccourcis : http://127.0.0.1:29999/mock/goto?state=champselect|finalization|aram|readycheck|…
+# raccourcis : http://127.0.0.1:29999/mock/goto?state=champselect|finalization|aram|mayhem|readycheck|…
 # faux carrousel de skins pour tester le plugin : http://127.0.0.1:29999/mock/client
 
 test/e2e/run.sh                                 # test de bout en bout (Playwright), Wi-Fi

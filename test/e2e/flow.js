@@ -19,6 +19,8 @@ const shot = (p, n) => p.screenshot({ path: `${OUT}/${n}.png` });
   await phone.waitForSelector('text=Choisis un mode de jeu');
   await phone.waitForSelector('.mode');
   await shot(phone, '02-modes');
+  // Custom game queues (16.x) are not modes to queue for.
+  if (await phone.$('.mode:has-text("Custom")')) throw new Error('custom game queues listed as modes');
   await phone.click('.mode:has-text("Classée Solo/Duo")');
   await phone.waitForSelector('text=Trouver une partie');
   await shot(phone, '03-lobby');
@@ -152,6 +154,10 @@ const shot = (p, n) => p.screenshot({ path: `${OUT}/${n}.png` });
   await phone.check('.auto-build input');
   await phone.waitForTimeout(500);
   console.log('builds OK');
+  // Trade offer in finalization: renamed champion-swaps on 16.x clients.
+  await phone.click('button[title="Proposer un échange"]', { timeout: 15000 });
+  await phone.waitForSelector('.toast:has-text("Échange proposé")', { timeout: 5000 });
+  console.log('trade OK');
   // ARAM
   await fetch('http://127.0.0.1:29999/mock/goto?state=aram');
   await phone.waitForSelector('text=Banc', { timeout: 8000 });
@@ -161,6 +167,18 @@ const shot = (p, n) => p.screenshot({ path: `${OUT}/${n}.png` });
   await shot(phone, '15-aram');
   await phone.click('.bench-champ >> nth=0');
   await phone.waitForTimeout(500);
+  // ARAM: Mayhem champion cards (2 + the lucky card), not in the session.
+  await fetch('http://127.0.0.1:29999/mock/goto?state=mayhem');
+  await phone.waitForSelector('text=Choisis ta carte', { timeout: 8000 });
+  await phone.waitForSelector('.champ-card >> nth=2', { timeout: 8000 });
+  await phone.waitForTimeout(400);
+  await shot(phone, '15b-mayhem-cards');
+  await phone.click('.champ-card.lucky');
+  await phone.waitForSelector('.cell.me:has-text("Lucian")', { timeout: 8000 });
+  await phone.waitForSelector('.bench-champ >> nth=1', { timeout: 8000 });
+  await phone.waitForTimeout(1500);
+  await shot(phone, '15c-mayhem-picked');
+  console.log('ARAM cards OK');
   // In game / end
   await fetch('http://127.0.0.1:29999/mock/goto?state=ingame');
   await phone.waitForSelector('text=Partie en cours');
@@ -186,6 +204,10 @@ const shot = (p, n) => p.screenshot({ path: `${OUT}/${n}.png` });
   await phone.waitForSelector('h2:has-text("Outil d\'entraînement")', { timeout: 10000 });
   await shot(phone, '18-practice-lobby');
   await phone.click('button:has-text("Lancer la partie")');
+  // The client searches a game server briefly: a launch, not a queue.
+  await phone.waitForSelector('.banner:has-text("Lancement de la partie")', { timeout: 5000 });
+  if (await phone.$('text=Recherche en cours')) throw new Error('practice tool shown as a queue');
+  await shot(phone, '18b-practice-launch');
   await phone.waitForSelector('text=À toi de choisir', { timeout: 10000 });
   await phone.click('.champ:has-text("Ahri")');
   await phone.click('button:has-text("Verrouiller")');

@@ -1,6 +1,6 @@
 import { html, useEffect, useMemo, useState } from "../vendor/preact-htm.js";
 import { act, lcu, observe, refresh, useLcu, useStore } from "./api.js";
-import { championIcon, loadChampions, positionLabel, searchKey, useData } from "./data.js";
+import { championIcon, championTile, loadChampions, positionLabel, searchKey, useData } from "./data.js";
 import { SkinsTab } from "./skins.js";
 import { RunesTab } from "./runes.js";
 import { SpellsTab } from "./spells.js";
@@ -9,8 +9,33 @@ import { BuildsTab } from "./builds.js";
 const SESSION = "/lol-champ-select/v1/session";
 const PICKABLE = "/lol-champ-select/v1/pickable-champion-ids";
 const BANNABLE = "/lol-champ-select/v1/bannable-champion-ids";
+// ARAM and ARAM: Mayhem deal 2 champion cards (3 with the lucky card) to
+// choose from. They are not in the session: the client reads them here.
+const SUBSET = "/lol-lobby-team-builder/champ-select/v1/subset-champion-list";
 
-observe([PICKABLE, BANNABLE]);
+observe([PICKABLE, BANNABLE, SUBSET]);
+
+// Clients 16.x renamed trades and pick order swaps; older ones still use
+// the first names. The session keeps the old field names.
+const SWAP_PATHS = {
+  trades: ["champion-swaps", "trades"],
+  swaps: ["pick-order-swaps", "swaps"],
+  "position-swaps": ["position-swaps"],
+};
+
+async function swapCall(kind, id, verb) {
+  let first;
+  for (const name of SWAP_PATHS[kind]) {
+    try {
+      await lcu("POST", `/lol-champ-select/v1/session/${name}/${id}/${verb}`);
+      return true;
+    } catch (e) {
+      if (!first) first = e;
+      if (e.status !== 404) break;
+    }
+  }
+  throw first;
+}
 
 function useNow(ms = 250) {
   const [now, setNow] = useState(Date.now());
@@ -113,8 +138,7 @@ function Team({ cells, localCellId, activeCells, trades, champions, enemy }) {
         html`<button
           class="btn tiny secondary"
           title="Proposer un échange"
-          onClick=${() =>
-            act(lcu("POST", `/lol-champ-select/v1/session/trades/${trade.id}/request`), "Échange proposé")}
+          onClick=${() => act(swapCall("trades", trade.id, "request"), "Échange proposé")}
         >
           ⇄
         </button>`}
@@ -160,15 +184,10 @@ function Requests({ session, champions }) {
       <div class="grow">
         <b>${cell.gameName || (champ && champ.name) || "Un allié"}</b> ${r.label}
       </div>
-      <button
-        class="btn small"
-        onClick=${() => act(lcu("POST", `/lol-champ-select/v1/session/${r.kind}/${r.id}/accept`))}
-      >
-        Accepter
-      </button>
+      <button class="btn small" onClick=${() => act(swapCall(r.kind, r.id, "accept"))}>Accepter</button>
       <button
         class="btn small secondary"
-        onClick=${() => act(lcu("POST", `/lol-champ-select/v1/session/${r.kind}/${r.id}/decline`))}
+        onClick=${() => act(swapCall(r.kind, r.id, "decline"))}
       >
         ✕
       </button>
@@ -176,16 +195,23 @@ function Requests({ session, champions }) {
   })}`;
 }
 
-function Bench({ session }) {
+function Bench({ session, cards }) {
   const bench = session.benchChampions
     ? session.benchChampions.map((b) => b.championId)
     : session.benchChampionIds || [];
-  const canReroll = session.allowRerolling && session.rerollsRemaining > 0;
+  // No reroll with champion cards (the client hides it too).
+  const rerolls = Boolean(session.allowRerolling) && !session.allowSubsetChampionPicks;
+  const canReroll = rerolls && session.rerollsRemaining > 0;
+  // With champion cards the bench opens at finalization, except for the
+  // champions of your own cards (same rule as the client).
+  const phase = session.timer && session.timer.phase;
+  const waiting = Boolean(session.allowSubsetChampionPicks) && phase === "BAN_PICK";
+  const mine = new Set(cards || []);
   if (!session.benchEnabled && !canReroll) return null;
   return html`<section class="card">
     <div class="row space">
       <h3 class="no-margin">Banc</h3>
-      ${session.allowRerolling &&
+      ${rerolls &&
       html`<button
         class="btn small secondary"
         disabled=${!canReroll}
@@ -195,17 +221,90 @@ function Bench({ session }) {
       </button>`}
     </div>
     <div class="bench">
-      ${bench.map(
-        (id) => html`<button
+      ${bench.map((id) => {
+        const locked = waiting && !mine.has(id);
+        return html`<button
           key=${id}
-          class="bench-champ"
+          class="bench-champ ${locked ? "locked" : ""}"
+          disabled=${locked}
           onClick=${() => act(lcu("POST", `/lol-champ-select/v1/session/bench/swap/${id}`))}
         >
-          <${ChampIcon} id=${id} />
-        </button>`
-      )}
+          <${ChampIcon} id=${id} faded=${locked} />
+        </button>`;
+      })}
       ${!bench.length && html`<span class="muted small">Vide</span>`}
     </div>
+    ${waiting && bench.length > 0 && html`<p class="small muted">Le banc s'ouvre à la finalisation.</p>`}
+  </section>`;
+}
+
+// ARAM / ARAM: Mayhem: tap one of the dealt cards. Like in the client, the
+// pick is locked at once (the other cards go to the bench).
+function CardPicker({ action, cards, fallback }) {
+  const champions = useData(loadChampions);
+  const [sent, setSent] = useState(null);
+  const [waitedLong, setWaitedLong] = useState(false);
+  const count = (cards && cards.length) || 0;
+
+  useEffect(() => {
+    if (count) return undefined;
+    // The cards are dealt a moment after champion select starts.
+    refresh(SUBSET);
+    const poll = setInterval(() => refresh(SUBSET), 700);
+    const late = setTimeout(() => setWaitedLong(true), 4000);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(late);
+    };
+  }, [count]);
+
+  const choose = async (championId) => {
+    if (sent) return;
+    setSent(championId);
+    const ok = await act(
+      lcu("PATCH", `/lol-champ-select/v1/session/actions/${action.id}`, {
+        championId,
+        completed: true,
+      }).then(() => true)
+    );
+    if (!ok) setSent(null);
+  };
+
+  // No cards from this client: the usual list still lets you pick.
+  if (!count && waitedLong && fallback) return fallback;
+
+  return html`<section class="card action pick">
+    <h3>Choisis ta carte !</h3>
+    ${!count &&
+    html`<div class="spinner"></div>
+      <p class="muted center small">Distribution des cartes…</p>`}
+    <div class="champ-cards">
+      ${(cards || []).map((id, i) => {
+        const champ = champions && champions.get(id);
+        const lucky = count === 3 && i === 2;
+        return html`<button
+          key=${id}
+          class="champ-card ${lucky ? "lucky" : ""} ${sent === id ? "chosen" : ""}"
+          disabled=${sent !== null && sent !== id}
+          onClick=${() => choose(id)}
+        >
+          <img
+            src=${championTile(id)}
+            alt=""
+            onError=${(e) => {
+              // Some clients have no tile: the square icon then.
+              const img = e.currentTarget;
+              if (img.dataset.fallback) return;
+              img.dataset.fallback = "1";
+              img.src = championIcon(id);
+            }}
+          />
+          <span class="champ-card-name">${champ ? champ.name : ""}</span>
+          ${lucky && html`<span class="tag lucky-tag">Carte chanceuse</span>`}
+        </button>`;
+      })}
+    </div>
+    ${sent && html`<p class="muted center small">Verrouillage…</p>`}
   </section>`;
 }
 
@@ -223,7 +322,7 @@ async function lockAction(action, championId) {
   }
 }
 
-function ActionPanel({ session, active, futurePick, planning }) {
+function ActionPanel({ session, active, futurePick, planning, cards, cardMode }) {
   const pickable = useLcu(PICKABLE);
   const bannable = useLcu(BANNABLE);
   const [showFuture, setShowFuture] = useState(false);
@@ -245,6 +344,13 @@ function ActionPanel({ session, active, futurePick, planning }) {
 
   if (active) {
     const isBan = active.type === "ban";
+    if (!isBan && cardMode) {
+      return html`<${CardPicker}
+        action=${active}
+        cards=${cards}
+        fallback=${html`<${ActionPanel} session=${session} active=${active} />`}
+      />`;
+    }
     return html`<section class="card action ${isBan ? "ban" : "pick"}">
       <h3>${isBan ? "À toi de bannir !" : "À toi de choisir !"}</h3>
       <${ChampionGrid}
@@ -264,7 +370,8 @@ function ActionPanel({ session, active, futurePick, planning }) {
     </section>`;
   }
 
-  if (futurePick) {
+  // Cards are dealt to everyone at once: nothing to prepare.
+  if (futurePick && !cardMode) {
     if (planning || showFuture) {
       return html`<section class="card action">
         <div class="row space">
@@ -329,8 +436,13 @@ const PHASES = {
 
 export function ChampSelect() {
   const session = useLcu(SESSION);
+  const cards = useLcu(SUBSET);
   const champions = useData(loadChampions);
   if (!session) return html`<main class="center-screen"><div class="spinner"></div></main>`;
+  // The session flag decides, like in the client: the card list may still
+  // hold the cards of an earlier game.
+  const cardMode = Boolean(session.allowSubsetChampionPicks);
+  const dealt = cardMode && Array.isArray(cards) ? cards : [];
 
   const localCellId = session.localPlayerCellId;
   const myTeam = session.myTeam || [];
@@ -345,8 +457,19 @@ export function ChampSelect() {
   const activeCells = new Set(actions.filter((a) => a.isInProgress).map((a) => a.actorCellId));
   const phase = session.timer && session.timer.phase;
   const anyBan = actions.some((a) => a.isInProgress && a.type === "ban");
+  const pickLabel = cardMode ? "Choix des cartes" : "Sélection";
+  // The cards last a few seconds: show them first.
+  const cardsFirst = cardMode && active && active.type === "pick";
+  const actionPanel = html`<${ActionPanel}
+    session=${session}
+    active=${active}
+    futurePick=${!active && !locked ? futurePick : null}
+    planning=${phase === "PLANNING"}
+    cards=${dealt}
+    cardMode=${cardMode}
+  />`;
   const phaseLabel =
-    phase === "BAN_PICK" ? (anyBan ? "Bannissements" : "Sélection") : PHASES[phase] || "Sélection";
+    phase === "BAN_PICK" ? (anyBan ? "Bannissements" : pickLabel) : PHASES[phase] || "Sélection";
 
   return html`<main class="screen champ-select">
     <div class="cs-header">
@@ -357,6 +480,7 @@ export function ChampSelect() {
       <${Timer} timer=${session.timer} />
     </div>
     <${Requests} session=${session} champions=${champions} />
+    ${cardsFirst && actionPanel}
     <div class="teams">
       <${Team}
         cells=${myTeam}
@@ -375,13 +499,8 @@ export function ChampSelect() {
       />`}
     </div>
     <${Bans} session=${session} />
-    <${ActionPanel}
-      session=${session}
-      active=${active}
-      futurePick=${!active && !locked ? futurePick : null}
-      planning=${phase === "PLANNING"}
-    />
-    <${Bench} session=${session} />
+    ${!cardsFirst && actionPanel}
+    <${Bench} session=${session} cards=${dealt} />
     <${Tabs} locked=${locked} myCell=${myCell} session=${session} />
   </main>`;
 }

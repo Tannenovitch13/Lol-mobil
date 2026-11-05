@@ -91,11 +91,50 @@ func queues() []map[string]any {
 		q(440, "Classée Flexible", "CLASSIC", 11, "PvP", true, true),
 		q(490, "Partie rapide", "CLASSIC", 11, "PvP", false, false),
 		q(450, "ARAM", "ARAM", 12, "PvP", false, false),
+		q(2400, "ARAM : Chaos", "KIWI", 12, "PvP", false, false),
 		q(1700, "Arène", "CHERRY", 30, "PvP", false, false),
 		q(870, "Coop vs IA (Intro)", "CLASSIC", 11, "VersusAi", false, false),
 		q(890, "Coop vs IA (Intermédiaire)", "CLASSIC", 11, "VersusAi", false, false),
 		map[string]any{"id": 1300, "description": "Mode désactivé", "queueAvailability": "PlatformDisabled", "category": "PvP", "mapId": 11},
+		// Custom game queues (16.x): not modes to queue for.
+		map[string]any{"id": 3100, "description": "SR Blind Pick Custom", "gameMode": "CLASSIC", "mapId": 11, "category": "Custom", "isCustom": true, "queueAvailability": "Available"},
+		map[string]any{"id": 3140, "description": "Multiplayer Practice Tool Custom", "gameMode": "PRACTICETOOL", "mapId": 11, "category": "Custom", "isCustom": true, "queueAvailability": "Available"},
+		map[string]any{"id": 3270, "description": "ARAM: Mayhem", "gameMode": "KIWI", "mapId": 12, "category": "Custom", "isCustom": true, "queueAvailability": "Available"},
 	}
+}
+
+func customQueue(id int) bool {
+	for _, q := range queues() {
+		if q["id"] == id && q["isCustom"] == true {
+			return true
+		}
+	}
+	return false
+}
+
+// customGames is /lol-game-queues/v1/custom: what the custom game screen offers.
+func customGames() map[string]any {
+	sub := func(mapID int, mode string, mutator, perTeam int) map[string]any {
+		return map[string]any{
+			"mapId": mapID, "gameMode": mode, "mutators": []any{map[string]any{"id": mutator}},
+			"numPlayersPerTeam": perTeam, "maxPlayerCount": perTeam * 2, "minLevel": 0,
+			"queueAvailability": "Available", "customSpectatorPolicies": []any{"AllAllowed", "NotAllowed"},
+		}
+	}
+	return map[string]any{
+		"queueAvailability": "Available", "spectatorSlotLimit": 4, "gameServerRegions": []any{},
+		"spectatorPolicies": []any{"AllAllowed", "LobbyAllowed", "FriendsAllowed", "NotAllowed"},
+		"subcategories":     []any{sub(11, "CLASSIC", 1, 5), sub(11, "PRACTICETOOL", 1, 5), sub(12, "ARAM", 4, 5)},
+	}
+}
+
+func containsInt(list []int, v int) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 func spells() []map[string]any {

@@ -5,6 +5,7 @@ import {
   lcu,
   observe,
   pair,
+  refresh,
   saveSettings,
   setToken,
   store,
@@ -31,6 +32,14 @@ observe([
   "/lol-matchmaking/v1/ready-check",
   "/lol-champ-select/v1/session",
 ]);
+
+const RESYNC = [
+  "/lol-gameflow/v1/gameflow-phase",
+  "/lol-lobby/v2/lobby",
+  "/lol-matchmaking/v1/search",
+  "/lol-matchmaking/v1/ready-check",
+  "/lol-champ-select/v1/session",
+];
 
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
@@ -301,6 +310,23 @@ function App() {
       android.keepScreenOn(phase === "ReadyCheck" || phase === "ChampSelect");
     }
   }, [phase]);
+  // An event can be missed (phone asleep, weak network): read the state
+  // again when the app comes back on screen, and the phase now and then.
+  useEffect(() => {
+    if (connection !== "open") return undefined;
+    const resync = () => {
+      if (document.visibilityState !== "visible") return;
+      for (const path of RESYNC) refresh(path);
+    };
+    const tick = setInterval(() => {
+      if (document.visibilityState === "visible") refresh("/lol-gameflow/v1/gameflow-phase");
+    }, 10000);
+    document.addEventListener("visibilitychange", resync);
+    return () => {
+      clearInterval(tick);
+      document.removeEventListener("visibilitychange", resync);
+    };
+  }, [connection]);
   return html`
     ${connection !== "unpaired" && html`<${Header} onSettings=${() => setSettingsOpen(true)} />`}
     <${Router} />

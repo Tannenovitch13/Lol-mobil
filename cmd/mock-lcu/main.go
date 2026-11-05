@@ -3,7 +3,7 @@
 // flow: lobby -> queue -> ready check -> bans/picks -> finalization -> game.
 // With -rose it also imitates Rose's bridge on 127.0.0.1:50000.
 //
-// Jump to a state with: GET /mock/goto?state=lobby|matchmaking|readycheck|champselect|finalization|aram|ingame|endofgame|none
+// Jump to a state with: GET /mock/goto?state=lobby|matchmaking|readycheck|champselect|finalization|aram|mayhem|ingame|endofgame|none
 package main
 
 import (
@@ -55,6 +55,7 @@ type mock struct {
 	nextPage  int
 	gen       int // invalidates pending automatic steps
 	itemSets  map[string]any
+	subset    []int // champion cards dealt to me (ARAM / ARAM: Mayhem)
 
 	subsMu sync.Mutex
 	subs   map[*websocket.Conn]*sync.Mutex
@@ -175,6 +176,8 @@ func (m *mock) startSearch() {
 }
 
 func (m *mock) popQueue() {
+	m.search = map[string]any{"searchState": "Found", "timeInQueue": 4.0, "estimatedQueueTime": 95.0, "errors": []any{}}
+	m.emit("/lol-matchmaking/v1/search", m.search)
 	m.ready = map[string]any{"state": "InProgress", "playerResponse": "None", "timer": 0, "declinerIds": []any{}}
 	m.emit("/lol-matchmaking/v1/ready-check", m.ready)
 	m.setPhase("ReadyCheck")
@@ -187,9 +190,32 @@ func (m *mock) cell(id int, champ int, pos string, name string) map[string]any {
 	}
 }
 
+// endSearch: the client drops the search once champion select starts.
+func (m *mock) endSearch() {
+	if m.search != nil {
+		m.search = nil
+		m.emit("/lol-matchmaking/v1/search", nil)
+	}
+}
+
+// startQueueChampSelect starts the champion select of the lobby's queue.
+func (m *mock) startQueueChampSelect() {
+	m.endSearch()
+	switch m.queueID {
+	case 450:
+		m.startChampSelect(true)
+	case 2400:
+		m.startCardChampSelect()
+	default:
+		m.startChampSelect(false)
+		m.advance()
+	}
+}
+
 func (m *mock) startChampSelect(aram bool) {
 	m.myChamp = 0
 	m.skinID = 0
+	m.subset = nil
 	positions := []string{"top", "jungle", "middle", "bottom", "utility"}
 	names := []string{"Coéquipier", "JungleKing", "", "BotLaner", "Supp0rt"}
 	var myTeam, theirTeam []any
@@ -247,10 +273,80 @@ func (m *mock) startChampSelect(aram bool) {
 	m.setPhase("ChampSelect")
 }
 
+// Champion cards: ARAM and ARAM: Mayhem since 2025. Everyone is dealt 2
+// cards (3 with the lucky card) and picks one; the others go to the bench,
+// which opens at finalization. The cards are not in the session, only in
+// /lol-lobby-team-builder/champ-select/v1/subset-champion-list, and the
+// pickable champion list stays empty (what made the phone stuck).
+const subsetURI = "/lol-lobby-team-builder/champ-select/v1/subset-champion-list"
+
+func (m *mock) startCardChampSelect() {
+	m.myChamp = 0
+	m.skinID = 0
+	m.subset = []int{}
+	names := []string{"Coéquipier", "JungleKing", "", "BotLaner", "Supp0rt"}
+	var myTeam, picks []any
+	for i := 0; i < 5; i++ {
+		c := m.cell(i, 0, "", names[i])
+		if i == 2 {
+			c["spell1Id"], c["spell2Id"] = m.spell1, m.spell2
+		}
+		myTeam = append(myTeam, c)
+		picks = append(picks, map[string]any{"id": 30 + i, "actorCellId": i, "championId": 0, "completed": false, "isAllyAction": true, "isInProgress": true, "type": "pick"})
+	}
+	m.session = map[string]any{
+		"localPlayerCellId": 2, "myTeam": myTeam, "theirTeam": []any{},
+		"bans":   map[string]any{"myTeamBans": []any{}, "theirTeamBans": []any{}, "numBans": 0},
+		"trades": []any{}, "pickOrderSwaps": []any{}, "positionSwaps": []any{},
+		"actions":                  []any{picks},
+		"allowSubsetChampionPicks": true, "hasSimultaneousPicks": true,
+		"benchEnabled": true, "benchChampions": []any{}, "allowRerolling": false, "rerollsRemaining": 0,
+		"timer": map[string]any{"phase": "BAN_PICK", "adjustedTimeLeftInPhase": 12000, "totalTimeInPhase": 12000},
+	}
+	m.emit(subsetURI, m.subset)
+	m.emit("/lol-champ-select/v1/session", m.session)
+	m.emit("/lol-champ-select/v1/skin-carousel-skins", m.skins())
+	m.setPhase("ChampSelect")
+	// The cards are dealt a moment later (Yasuo, Amumu and the lucky Lucian).
+	m.later(*speed/2, func() {
+		m.subset = []int{157, 32, 236}
+		m.emit(subsetURI, m.subset)
+		// Teammates choose a card; their other card goes to the bench.
+		m.later(*speed, func() {
+			taken := map[int]bool{157: true, 32: true, 236: true}
+			bench := m.session["benchChampions"].([]any)
+			for _, a := range m.allActions() {
+				if a["actorCellId"] == 2 || a["completed"] == true {
+					continue
+				}
+				id := randomChamp(taken)
+				a["championId"], a["completed"], a["isInProgress"] = id, true, false
+				m.setCellChamp(a["actorCellId"].(int), id)
+				bench = append(bench, map[string]any{"championId": randomChamp(taken), "isPriority": false})
+			}
+			m.session["benchChampions"] = bench
+			m.cardsDone()
+		})
+	})
+}
+
+// cardsDone moves to finalization once everyone has a champion.
+func (m *mock) cardsDone() {
+	for _, a := range m.allActions() {
+		if a["completed"] != true {
+			m.emit("/lol-champ-select/v1/session", m.session)
+			return
+		}
+	}
+	m.session["timer"] = map[string]any{"phase": "FINALIZATION", "adjustedTimeLeftInPhase": 45000, "totalTimeInPhase": 45000}
+	m.emit("/lol-champ-select/v1/session", m.session)
+}
+
 // startCustomChampSelect: practice tool, blind pick, alone.
 func (m *mock) startCustomChampSelect() {
 	m.myChamp = 0
 	m.skinID = 0
+	m.subset = nil
 	me := m.cell(2, 0, "", "")
 	me["spell1Id"], me["spell2Id"] = m.spell1, m.spell2
 	m.session = map[string]any{
@@ -424,6 +520,7 @@ func (m *mock) goTo(state string) {
 	case "none":
 		m.lobby = nil
 		m.emit("/lol-lobby/v2/lobby", nil)
+		m.endSearch()
 		m.setPhase("None")
 	case "lobby":
 		m.makeLobby(420)
@@ -460,6 +557,9 @@ func (m *mock) goTo(state string) {
 	case "aram":
 		m.makeLobby(450)
 		m.startChampSelect(true)
+	case "mayhem":
+		m.makeLobby(2400)
+		m.startCardChampSelect()
 	case "ingame":
 		m.setPhase("InProgress")
 	case "endofgame":
@@ -475,7 +575,7 @@ var (
 	rePage        = regexp.MustCompile(`^/lol-perks/v1/pages/(\d+)$`)
 	reRecommended = regexp.MustCompile(`^/lol-perks/v1/recommended-pages/champion/(\d+)/`)
 	reMember      = regexp.MustCompile(`^/lol-lobby/v2/lobby/members/(\d+)/(kick|promote|grant-invite|revoke-invite)$`)
-	reTrade       = regexp.MustCompile(`^/lol-champ-select/v1/session/(trades|swaps|position-swaps)/(\d+)/(request|accept|decline)$`)
+	reTrade       = regexp.MustCompile(`^/lol-champ-select/v1/session/(trades|swaps|champion-swaps|pick-order-swaps|position-swaps)/(\d+)/(request|accept|decline|cancel)$`)
 )
 
 func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -583,24 +683,55 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, m.lobby)
 	case "POST /lol-lobby/v2/lobby":
-		if body["isCustom"] == true {
-			// Practice tool / custom game.
-			m.makeLobby(-1)
+		q, _ := body["queueId"].(float64)
+		if custom, ok := body["customGameLobby"].(map[string]any); ok {
+			// Custom games have their own queues on 16.x clients (practice
+			// tool 3140). Without one, a real client answered "Invalid
+			// session" (user report).
+			if !customQueue(int(q)) {
+				writeJSON(w, 500, map[string]any{"errorCode": "RPC_ERROR", "httpStatus": 500, "message": "Invalid session"})
+				return
+			}
+			conf, _ := custom["configuration"].(map[string]any)
+			mode, _ := conf["gameMode"].(string)
+			name, _ := custom["lobbyName"].(string)
+			m.makeLobby(int(q))
 			cfg := m.lobby["gameConfig"].(map[string]any)
 			cfg["isCustom"] = true
-			cfg["gameMode"] = "PRACTICETOOL"
+			cfg["gameMode"] = mode
+			cfg["customLobbyName"] = name
 			cfg["showPositionSelector"] = false
 			m.lobby["members"] = m.lobby["members"].([]any)[:1]
 			m.emit("/lol-lobby/v2/lobby", m.lobby)
 			writeJSON(w, 200, m.lobby)
 			return
 		}
-		q, _ := body["queueId"].(float64)
 		m.makeLobby(int(q))
 		writeJSON(w, 200, m.lobby)
 	case "POST /lol-lobby/v1/lobby/custom/start-champ-select":
-		m.startCustomChampSelect()
-		writeJSON(w, 200, map[string]any{"success": true})
+		cfg, _ := m.lobby["gameConfig"].(map[string]any)
+		if m.lobby == nil || cfg["isCustom"] != true {
+			writeJSON(w, 400, map[string]any{"httpStatus": 400, "message": "Not in a custom game lobby"})
+			return
+		}
+		// A real client looks for a game server first: a short search with
+		// no estimated time, then champion select.
+		m.search = map[string]any{"searchState": "Searching", "timeInQueue": 0.0, "estimatedQueueTime": 0.0, "errors": []any{}}
+		m.emit("/lol-matchmaking/v1/search", m.search)
+		m.setPhase("Matchmaking")
+		m.later(*speed, func() {
+			m.endSearch()
+			m.startCustomChampSelect()
+		})
+		writeJSON(w, 200, map[string]any{"success": true, "failedPlayers": []any{}})
+	case "GET /lol-game-queues/v1/custom":
+		writeJSON(w, 200, customGames())
+	case "GET " + subsetURI:
+		if m.phase != "ChampSelect" || m.subset == nil {
+			notFound(w, "No active delegate")
+			return
+		}
+		writeJSON(w, 200, m.subset)
 	case "DELETE /lol-lobby/v2/lobby":
 		m.lobby = nil
 		m.emit("/lol-lobby/v2/lobby", nil)
@@ -645,10 +776,7 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		m.emit("/lol-matchmaking/v1/ready-check", m.ready)
 		m.later(*speed, func() {
 			m.emit("/lol-matchmaking/v1/ready-check", nil)
-			m.startChampSelect(m.queueID == 450)
-			if m.queueID != 450 {
-				m.advance()
-			}
+			m.startQueueChampSelect()
 		})
 		w.WriteHeader(204)
 	case "POST /lol-matchmaking/v1/ready-check/decline":
@@ -668,9 +796,9 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		taken := m.takenChamps()
-		var ids []int
+		ids := []int{}
 		for _, c := range champions {
-			if !taken[c.ID] {
+			if !taken[c.ID] && m.session["allowSubsetChampionPicks"] != true {
 				ids = append(ids, c.ID)
 			}
 		}
@@ -772,7 +900,12 @@ func (m *mock) serveDynamic(w http.ResponseWriter, r *http.Request, body map[str
 				writeJSON(w, 400, map[string]any{"message": "not your action"})
 				return
 			}
+			cards := m.session["allowSubsetChampionPicks"] == true
 			if v, ok := body["championId"].(float64); ok && r.Method == http.MethodPatch {
+				if cards && !containsInt(m.subset, int(v)) {
+					writeJSON(w, 400, map[string]any{"message": "Champion is not one of your cards"})
+					return
+				}
 				a["championId"] = int(v)
 				if a["type"] == "pick" && a["isInProgress"] != true {
 					m.myCell()["championPickIntent"] = int(v)
@@ -793,7 +926,21 @@ func (m *mock) serveDynamic(w http.ResponseWriter, r *http.Request, body map[str
 					bans := m.session["bans"].(map[string]any)
 					bans["myTeamBans"] = append(bans["myTeamBans"].([]any), a["championId"])
 				}
-				m.advance()
+				if cards {
+					// My other cards go to the bench.
+					bench := m.session["benchChampions"].([]any)
+					for _, id := range m.subset {
+						if id != a["championId"] {
+							bench = append(bench, map[string]any{"championId": id, "isPriority": false})
+						}
+					}
+					m.session["benchChampions"] = bench
+					m.subset = []int{}
+					m.emit(subsetURI, m.subset)
+					m.cardsDone()
+				} else {
+					m.advance()
+				}
 			} else {
 				m.emit("/lol-champ-select/v1/session", m.session)
 			}
@@ -805,6 +952,10 @@ func (m *mock) serveDynamic(w http.ResponseWriter, r *http.Request, body map[str
 	}
 	if mt := reBenchSwap.FindStringSubmatch(p); mt != nil && m.session != nil {
 		id, _ := strconv.Atoi(mt[1])
+		if timer, _ := m.session["timer"].(map[string]any); m.session["allowSubsetChampionPicks"] == true && timer["phase"] == "BAN_PICK" {
+			writeJSON(w, 400, map[string]any{"message": "The bench opens at finalization"})
+			return
+		}
 		bench := m.session["benchChampions"].([]any)
 		for i, b := range bench {
 			if b.(map[string]any)["championId"] == id {
@@ -888,6 +1039,11 @@ func (m *mock) serveDynamic(w http.ResponseWriter, r *http.Request, body map[str
 		return
 	}
 	if mt := reTrade.FindStringSubmatch(p); mt != nil {
+		if mt[1] == "trades" || mt[1] == "swaps" {
+			// Renamed champion-swaps and pick-order-swaps on 16.x clients.
+			notFound(w, "Invalid URI format")
+			return
+		}
 		w.WriteHeader(204)
 		return
 	}

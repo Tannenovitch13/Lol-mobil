@@ -107,6 +107,10 @@ export function positionLabel(pos) {
 export const championIcon = (id) =>
   id > 0 ? asset(`/lol-game-data/assets/v1/champion-icons/${id}.png`) : "";
 
+// Base skin tile (larger, for the ARAM champion cards).
+export const championTile = (id) =>
+  id > 0 ? asset(`/lol-game-data/assets/v1/champion-tiles/${id}/${id}000.jpg`) : "";
+
 export const profileIcon = (id) =>
   id >= 0 && id !== undefined && id !== null ? asset(`/lol-game-data/assets/v1/profile-icons/${id}.jpg`) : "";
 
